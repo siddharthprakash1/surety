@@ -18,6 +18,7 @@ TWO = {"a": 0.9, "b": 0.1}
 SURE = {"a": 0.9, "b": 0.05, "c": 0.05}
 CAL_TWO = ([TWO] * 20, ["a"] * 20)
 TENTHS = ([{"a": 1 - i / 10} for i in range(10)], ["a"] * 10)
+CAL_FOUR = ([{"a": 0.5, "b": 0.5}, {"a": 0.6, "b": 0.3, "c": 0.1}, {"a": 0.9, "b": 0.1}, {"a": 1.0}], ["b", "c", "a", "a"])
 
 
 def synthetic(n, rng, k=5, scale=2):
@@ -178,13 +179,13 @@ def test_adaptive_alpha_floor_escalates_full_set():
     assert view(g.decide({"b": 0.1, "a": 0.9})) == ("escalate", None, ["a", "b"])
 
 
-def test_risk_conformal_meets_eps_on_calibration(data):
+def test_risk_conformal_bounds_error_near_fitted_automation(data):
     (cal_p, cal_g), (test_p, test_g) = data
-    risk, split, fitted = RiskConformal(0.1), SplitConformal(0.1), FittedThreshold(0.1)
-    for g in (risk, split, fitted):
+    risk, fitted = RiskConformal(0.1), FittedThreshold(0.1)
+    for g in (risk, fitted):
         g.fit(cal_p, cal_g)
     err = autonomous_error(risk, test_p, test_g)
-    auto = {g.name: automation(g, test_p) for g in (split, risk, fitted)}
+    auto = {g.name: automation(g, test_p) for g in (risk, fitted)}
     assert err <= 0.12 and auto[risk.name] >= auto[fitted.name] - 0.05, f"risk err={err:.4f} automation={auto}"
 
 
@@ -203,6 +204,13 @@ def test_risk_conformal_threshold_maximises_automation_among_feasible():
         g = RiskConformal(eps)
         g.fit(*cal)
         assert g.q == pytest.approx(q)
+
+
+def test_risk_conformal_tie_takes_smallest_q():
+    # bound .4 for q<.7; singletons on grid 0,.1,.4,.5,.7,.9 = 1,2,3,3,2,1
+    g = RiskConformal(0.4)
+    g.fit(*CAL_FOUR)
+    assert g.q == pytest.approx(0.4)
 
 
 @pytest.mark.parametrize("n", [0, 20])
@@ -245,3 +253,15 @@ def test_adaptive_risk_q_lookup_matches_risk_conformal_at_eps(data):
     risk.fit(*data[0])
     adaptive.fit(*data[0])
     assert adaptive.alpha == 0.1 and adaptive._q() == risk.q < math.inf
+
+
+def test_adaptive_risk_update_uses_literal_loss():
+    g = AdaptiveRisk(0.4)
+    g.fit(*CAL_FOUR)
+    # q(.4) = .4 → wrong singleton; q(<.4) = .7 → two-option set without gold, then empty set
+    steps = [({"a": 0.9, "b": 0.1}, "b"), ({"a": 0.5, "b": 0.4, "c": 0.1}, "c"), ({o: 0.25 for o in "abcd"}, "a")]
+    alphas = []
+    for probs, gold in steps:
+        g.update(probs, gold)
+        alphas.append(g.alpha)
+    assert alphas == pytest.approx([0.388, 0.396, 0.404])
