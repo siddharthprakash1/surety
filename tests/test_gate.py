@@ -20,17 +20,21 @@ CAL_TWO = ([TWO] * 20, ["a"] * 20)
 TENTHS = ([{"a": 1 - i / 10} for i in range(10)], ["a"] * 10)
 
 
-def synthetic(n, rng, k=5):
-    p = np.exp(rng.normal(size=(n, k)) * 2)
+def synthetic(n, rng, k=5, scale=2):
+    p = np.exp(rng.normal(size=(n, k)) * scale)
     p /= p.sum(axis=1, keepdims=True)
     gold = [f"o{rng.choice(k, p=row)}" for row in p]
     return [{f"o{j}": float(v) for j, v in enumerate(row)} for row in p], gold
 
 
+def cal_test(scale=2):
+    rng = np.random.default_rng(0)
+    return synthetic(2000, rng, scale=scale), synthetic(2000, rng, scale=scale)
+
+
 @pytest.fixture(scope="module")
 def data():
-    rng = np.random.default_rng(0)
-    return synthetic(2000, rng), synthetic(2000, rng)
+    return cal_test()
 
 
 def view(d):
@@ -176,19 +180,26 @@ def test_adaptive_alpha_floor_escalates_full_set():
 
 def test_risk_conformal_meets_eps_on_calibration(data):
     (cal_p, cal_g), (test_p, test_g) = data
-    risk, split = RiskConformal(0.1), SplitConformal(0.1)
-    risk.fit(cal_p, cal_g)
-    split.fit(cal_p, cal_g)
+    risk, split, fitted = RiskConformal(0.1), SplitConformal(0.1), FittedThreshold(0.1)
+    for g in (risk, split, fitted):
+        g.fit(cal_p, cal_g)
     err = autonomous_error(risk, test_p, test_g)
-    auto_risk, auto_split = automation(risk, test_p), automation(split, test_p)
-    msg = f"risk err={err:.4f} auto={auto_risk:.4f}, split auto={auto_split:.4f}"
-    assert err <= 0.12 and auto_risk > auto_split, msg
+    auto = {g.name: automation(g, test_p) for g in (split, risk, fitted)}
+    assert err <= 0.12 and auto[risk.name] >= auto[fitted.name] - 0.05, f"risk err={err:.4f} automation={auto}"
 
 
-def test_risk_conformal_threshold_is_smallest_feasible():
-    # releases 0.7, 0.6, -inf → bound 3/4·risk + 1/4 = 0.75 (q<0.6), 0.5 (0.6≤q<0.7), 0.25 (q≥0.7)
+@pytest.mark.parametrize("scale", [6, 10])
+def test_risk_conformal_acts_on_accurate_model(scale):
+    (cal_p, cal_g), (test_p, test_g) = cal_test(scale)
+    g = RiskConformal(0.1)
+    g.fit(cal_p, cal_g)
+    assert automation(g, test_p) > 0.8 and autonomous_error(g, test_p, test_g) <= 0.12
+
+
+def test_risk_conformal_threshold_maximises_automation_among_feasible():
+    # bound .75/.5/.25 on q<.6/<.7/≥.7; singletons on grid 0,.2,.3,.4,.6,.7,.8 = 0,1,2,3,2,1,0
     cal = ([{"a": 0.7, "b": 0.3}, {"a": 0.6, "b": 0.4}, {"a": 0.8, "b": 0.2}], ["b", "b", "a"])
-    for eps, q in [(0.55, 0.6), (0.3, 0.7)]:
+    for eps, q in [(0.8, 0.4), (0.55, 0.6), (0.3, 0.7)]:
         g = RiskConformal(eps)
         g.fit(*cal)
         assert g.q == pytest.approx(q)
@@ -227,3 +238,10 @@ def test_adaptive_risk_alpha_floor_escalates_full_set(data):
     g.update(SURE, "b", weight=100)
     assert g.alpha == 0.001
     assert view(g.decide(SURE)) == ("escalate", None, ["a", "b", "c"])
+
+
+def test_adaptive_risk_q_lookup_matches_risk_conformal_at_eps(data):
+    risk, adaptive = RiskConformal(0.1), AdaptiveRisk(0.1)
+    risk.fit(*data[0])
+    adaptive.fit(*data[0])
+    assert adaptive.alpha == 0.1 and adaptive._q() == risk.q < math.inf
