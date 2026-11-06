@@ -1,0 +1,141 @@
+import json
+import random
+from pathlib import Path
+
+import numpy as np
+
+from surety.calib import metrics as m
+from surety.decide import TemperatureScaler
+from surety.gate import (
+    AdaptiveConformal,
+    FittedThreshold,
+    FixedThreshold,
+    Margin,
+    PerChoiceThreshold,
+    SplitConformal,
+)
+
+SPLITS = ("cal", "test_in", "test_shift")
+
+
+def load_collection(path: Path) -> list[dict]:
+    with open(path) as f:
+        return [json.loads(line) for line in f if line.strip()]
+
+
+def _split(rows, probs, split):
+    idx = [i for i, r in enumerate(rows) if r["split"] == split]
+    return [probs[i] for i in idx], [rows[i]["gold_id"] for i in idx]
+
+
+def _present(rows):
+    found = {r["split"] for r in rows}
+    return [s for s in SPLITS if s in found]
+
+
+def variants(rows) -> dict[str, list[dict[str, float]]]:
+    debiased = [r["probs"] for r in rows]
+    scaler = TemperatureScaler()
+    scaler.fit(*_split(rows, debiased, "cal"))
+    return {
+        "first_run": [r["runs"][0] for r in rows],
+        "debiased": debiased,
+        "debiased+T": [scaler.apply(p) for p in debiased],
+    }
+
+
+def _fmt(x):
+    return f"{x:.3f}" if isinstance(x, float) else str(x)
+
+
+def _table(header, body) -> str:
+    lines = ["| " + " | ".join(header) + " |", "|" + "---|" * len(header)]
+    lines += ["| " + " | ".join(_fmt(c) for c in row) + " |" for row in body]
+    return "\n".join(lines) + "\n"
+
+
+def h1_table(rows) -> str:
+    vs = variants(rows)
+    body = []
+    for split in _present(rows):
+        for name, probs in vs.items():
+            p, g = _split(rows, probs, split)
+            body.append([split, name, len(g), m.accuracy(p, g), m.ece(p, g), m.brier(p, g),
+                         m.confident_error_rate(p, g)])
+    return _table(("split", "variant", "n", "acc", "ECE", "Brier", "conf_err"), body)
+
+
+def _sets(policy, probs):
+    if isinstance(policy, SplitConformal):
+        return [policy.prediction_set(p) for p in probs]
+    ds = [policy.decide(p) for p in probs]
+    return [[d.option_id] if d.action == "act" else list(p) for d, p in zip(ds, probs)]
+
+
+def h2_table(rows, eps_list=(0.05, 0.1)) -> str:
+    probs = variants(rows)["debiased+T"]
+    cal = _split(rows, probs, "cal")
+    tests = [s for s in _present(rows) if s != "cal"]
+    body = []
+    for eps in eps_list:
+        for policy in (FixedThreshold(0.55), FixedThreshold(0.7), Margin(0.1),
+                       FittedThreshold(eps), PerChoiceThreshold(eps), SplitConformal(eps)):
+            policy.fit(*cal)
+            for split in tests:
+                p, g = _split(rows, probs, split)
+                sets = _sets(policy, p)
+                body.append([str(eps), policy.name, split, len(g), m.autonomous_error_rate(sets, g),
+                             m.automation_rate(sets), m.coverage(sets, g), m.mean_set_size(sets)])
+    return _table(("eps", "policy", "split", "n", "auto_err", "automation", "coverage", "set_size"), body)
+
+
+def aci_simulation(rows, eps, audit_rates=(0.0, 0.05, 0.2), gamma=0.02, seed=0) -> str:
+    probs = variants(rows)["debiased+T"]
+    cal = _split(rows, probs, "cal")
+    sites = sorted({r["site"] for r in rows if r["split"] == "test_shift"})
+    random.Random(seed).shuffle(sites)
+    block = {s: k for k, s in enumerate(sites)}
+    stream = sorted((i for i, r in enumerate(rows) if r["split"] == "test_shift"),
+                    key=lambda i: block[rows[i]["site"]])
+    p, g = [probs[i] for i in stream], [rows[i]["gold_id"] for i in stream]
+
+    static = SplitConformal(eps)
+    static.fit(*cal)
+    sets = _sets(static, p)
+    body = [[static.name, "-", len(g), m.autonomous_error_rate(sets, g), m.automation_rate(sets), "-"]]
+    for r in audit_rates:
+        aci = AdaptiveConformal(eps, gamma)
+        aci.fit(*cal)
+        rng = random.Random(seed)
+        sets = []
+        for x, y in zip(p, g):
+            c = aci.prediction_set(x)
+            sets.append(c)
+            if len(c) != 1:
+                aci.update(x, y, 1.0)
+            elif rng.random() < r:
+                aci.update(x, y, 1 / r)
+        body.append([aci.name, f"{r:g}", len(g), m.autonomous_error_rate(sets, g),
+                     m.automation_rate(sets), aci.alpha])
+    return _table(("policy", "audit_rate", "n", "auto_err", "automation", "final_alpha"), body)
+
+
+def risk_coverage_plot(rows, out_png: Path) -> None:
+    from matplotlib.figure import Figure
+
+    probs = variants(rows)["debiased+T"]
+    fig = Figure(figsize=(5, 4))
+    ax = fig.subplots()
+    for split, color in zip(_present(rows), ("#2a78d6", "#eb6834", "#1baf7a")):
+        p, g = _split(rows, probs, split)
+        # quantile thresholds: overconfident splits pile up above any fixed grid's top step
+        taus = sorted({float(t) for t in np.quantile([max(x.values()) for x in p], np.linspace(0, 1, 201))})
+        curve = [c for c in m.risk_coverage_curve(p, g, taus) if c["acted"] > 0]
+        ax.plot([c["acted"] for c in curve], [c["risk"] for c in curve], color=color, lw=2, label=split)
+    ax.set(xlabel="coverage (fraction acted)", ylabel="risk (error among acted)", xlim=(0, 1), ylim=(0, None),
+           title="Risk–coverage, debiased+T")
+    ax.grid(alpha=0.3, lw=0.5)
+    ax.spines[["top", "right"]].set_visible(False)
+    ax.legend(frameon=False)
+    Path(out_png).parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(out_png, dpi=150, bbox_inches="tight")
