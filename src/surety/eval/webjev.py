@@ -57,11 +57,11 @@ def make_plan(instances, cal_sites, held_sites, n_cal: int, n_test_in: int, n_te
         return [rng.sample(sorted(ids), len(ids)) for _, ids in sorted(by_type.items())]
 
     cal_pools = pools(cal_sites)
-    return {"cal": _draw(cal_pools, n_cal), "test_in": _draw(cal_pools, n_test_in),
-            "test_shift": _draw(pools(held_sites), n_test_shift)}
+    return {"cal": draw_balanced(cal_pools, n_cal), "test_in": draw_balanced(cal_pools, n_test_in),
+            "test_shift": draw_balanced(pools(held_sites), n_test_shift)}
 
 
-def _draw(pools: list[list[str]], n: int) -> list[str]:
+def draw_balanced(pools: list[list[str]], n: int) -> list[str]:
     out: list[str] = []
     while len(out) < n and any(pools):
         for p in pools:
