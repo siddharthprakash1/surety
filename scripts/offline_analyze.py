@@ -2,7 +2,16 @@ import argparse
 from collections import Counter
 from pathlib import Path
 
-from surety.eval.analyze import SPLITS, aci_simulation, h1_table, h2_table, load_collection, risk_coverage_plot
+from surety.eval.analyze import (
+    SPLITS,
+    TAIL,
+    aci_simulation,
+    h1_table,
+    h2_table,
+    load_collection,
+    risk_coverage_plot,
+    variants,
+)
 
 EPS = (0.05, 0.1)
 
@@ -14,18 +23,20 @@ def main() -> None:
     args = ap.parse_args()
 
     rows = load_collection(args.collect)
+    vs = variants(rows)
     counts = Counter(r["split"] for r in rows)
     png = args.out.with_suffix(".png")
-    risk_coverage_plot(rows, png)
+    risk_coverage_plot(rows, png, vs=vs)
     parts = [
         f"# M1 analysis: {args.collect.stem}",
         f"- collection: `{args.collect}`\n"
         f"- rows: {', '.join(f'{s} {counts[s]}' for s in SPLITS)}\n"
         f"- backend: {', '.join(sorted({r['backend'] for r in rows}))}\n"
         f"- mode: {', '.join(sorted({r['mode'] for r in rows}))}",
-        "## H1: calibration", h1_table(rows),
-        "## H2: gates fitted on cal (debiased+T)", h2_table(rows, EPS),
-        *(f"## H2: ACI on test_shift, eps={eps}\n\n{aci_simulation(rows, eps)}" for eps in EPS),
+        "## H1: calibration", h1_table(rows, vs=vs),
+        "## H2: gates fitted on cal (debiased+T)", h2_table(rows, EPS, vs=vs),
+        *(f"## H2: adaptive gates on test_shift, eps={eps} (tail = last {TAIL} steps)\n\n"
+          f"{aci_simulation(rows, eps, vs=vs)}" for eps in EPS),
         f"![risk-coverage]({png.name})",
     ]
     args.out.write_text("\n\n".join(parts) + "\n")
