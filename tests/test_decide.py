@@ -3,7 +3,7 @@ import json
 import numpy as np
 import pytest
 
-from surety.decide import MockBackend, SystemOneClient, TemperatureScaler, average_runs
+from surety.decide import MockBackend, SystemOneClient, TemperatureScaler, average_runs, noul_debiased
 from surety.types import DecisionState, Option
 
 BASE = "http://kev"
@@ -48,6 +48,18 @@ def test_choice_renormalizes_partial_probabilities(httpx_mock):
     assert out.probs == {"a": 1.0, "b": 0.0}
 
 
+def test_choice_uniform_when_no_known_ids(httpx_mock):
+    httpx_mock.add_response(url=f"{BASE}/v1/systemone", json=ans({"z": 1.0}))
+    out = SystemOneClient(BASE).choice(state(opts=OPTS[:2]))
+    assert out.probs == {"a": 0.5, "b": 0.5}
+
+
+def test_client_context_manager_closes():
+    with SystemOneClient(BASE) as c:
+        assert not c.http.is_closed
+    assert c.http.is_closed
+
+
 def test_choice_truncates_long_state(httpx_mock):
     httpx_mock.add_response(url=f"{BASE}/v1/systemone", json=ans({"a": 1.0}))
     out = SystemOneClient(BASE, max_chars=100).choice(state("x" * 500))
@@ -57,9 +69,9 @@ def test_choice_truncates_long_state(httpx_mock):
 
 def test_permute_endpoint_used_when_available(httpx_mock):
     run = {"order": ["a", "b"], "probabilities": {"a": 0.7, "b": 0.3}, "choice": "a"}
-    httpx_mock.add_response(url=f"{BASE}/v1/systemone/permute", json={"runs": [run] * 3})
+    httpx_mock.add_response(url=f"{BASE}/v1/systemone/permute", json={"runs": [run] * 3, "usage": {"input_tokens": 7}})
     out = SystemOneClient(BASE).choice(state(opts=OPTS[:2]), n_perm=3, seed=5)
-    assert len(out.runs) == 3
+    assert len(out.runs) == 3 and out.input_tokens == 7
     body = bodies(httpx_mock, "/permute")[0]
     assert body["n_perm"] == 3 and body["seed"] == 5 and body["question"] == "q"
     assert body["request"]["questions"]["q"]["criteria"] == {"a": "Alpha", "b": "Beta"}
@@ -86,7 +98,6 @@ def test_noul_returns_probability(httpx_mock):
 
 
 def test_noul_debiased_averages_negation():
-    from surety.decide import noul_debiased
     vals = iter([0.8, 0.4])
     b = MockBackend()
     b.noul = lambda s, i: next(vals)
@@ -110,7 +121,7 @@ def test_temperature_fit_recovers_sharpening():
         gold.append(str(g))
     ts = TemperatureScaler()
     t = ts.fit(probs, gold)
-    assert t > 1.5 and ts.T == t
+    assert 2.0 < t < 4.5 and ts.T == t
     out = ts.apply(probs[0])
     assert sum(out.values()) == pytest.approx(1.0)
     assert max(out.values()) < max(probs[0].values())

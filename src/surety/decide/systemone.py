@@ -19,6 +19,15 @@ class SystemOneClient:
         headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
         self.http = httpx.Client(timeout=timeout, headers=headers)
 
+    def close(self) -> None:
+        self.http.close()
+
+    def __enter__(self) -> "SystemOneClient":
+        return self
+
+    def __exit__(self, *exc) -> None:
+        self.close()
+
     def _post(self, path: str, body: dict) -> httpx.Response:
         return self.http.post(f"{self.base_url}{path}", json=body)
 
