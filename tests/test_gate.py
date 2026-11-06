@@ -5,29 +5,36 @@ import pytest
 
 from surety.gate import (
     AdaptiveConformal,
+    AdaptiveRisk,
     FittedThreshold,
     FixedThreshold,
     Margin,
     PerChoiceThreshold,
+    RiskConformal,
     SplitConformal,
 )
 
 TWO = {"a": 0.9, "b": 0.1}
+SURE = {"a": 0.9, "b": 0.05, "c": 0.05}
 CAL_TWO = ([TWO] * 20, ["a"] * 20)
 TENTHS = ([{"a": 1 - i / 10} for i in range(10)], ["a"] * 10)
 
 
-def synthetic(n, rng, k=5):
-    p = np.exp(rng.normal(size=(n, k)) * 2)
+def synthetic(n, rng, k=5, scale=2):
+    p = np.exp(rng.normal(size=(n, k)) * scale)
     p /= p.sum(axis=1, keepdims=True)
     gold = [f"o{rng.choice(k, p=row)}" for row in p]
     return [{f"o{j}": float(v) for j, v in enumerate(row)} for row in p], gold
 
 
+def cal_test(scale=2):
+    rng = np.random.default_rng(0)
+    return synthetic(2000, rng, scale=scale), synthetic(2000, rng, scale=scale)
+
+
 @pytest.fixture(scope="module")
 def data():
-    rng = np.random.default_rng(0)
-    return synthetic(2000, rng), synthetic(2000, rng)
+    return cal_test()
 
 
 def view(d):
@@ -37,6 +44,10 @@ def view(d):
 def autonomous_error(policy, probs, gold):
     ds = [policy.decide(p) for p in probs]
     return np.mean([d.action == "act" and d.option_id != y for d, y in zip(ds, gold)])
+
+
+def automation(policy, probs):
+    return np.mean([policy.decide(p).action == "act" for p in probs])
 
 
 def test_fixed_threshold_acts_above_tau():
@@ -117,6 +128,8 @@ def test_conformal_single_option_acts(data):
         PerChoiceThreshold(0.1),
         SplitConformal(0.1),
         AdaptiveConformal(0.1),
+        RiskConformal(0.1),
+        AdaptiveRisk(0.1),
     ]
     for g in policies:
         g.fit(probs, gold)
@@ -163,3 +176,72 @@ def test_adaptive_alpha_floor_escalates_full_set():
     g.update(TWO, "b", weight=100)
     assert g.alpha == 0.001
     assert view(g.decide({"b": 0.1, "a": 0.9})) == ("escalate", None, ["a", "b"])
+
+
+def test_risk_conformal_meets_eps_on_calibration(data):
+    (cal_p, cal_g), (test_p, test_g) = data
+    risk, split, fitted = RiskConformal(0.1), SplitConformal(0.1), FittedThreshold(0.1)
+    for g in (risk, split, fitted):
+        g.fit(cal_p, cal_g)
+    err = autonomous_error(risk, test_p, test_g)
+    auto = {g.name: automation(g, test_p) for g in (split, risk, fitted)}
+    assert err <= 0.12 and auto[risk.name] >= auto[fitted.name] - 0.05, f"risk err={err:.4f} automation={auto}"
+
+
+@pytest.mark.parametrize("scale", [6, 10])
+def test_risk_conformal_acts_on_accurate_model(scale):
+    (cal_p, cal_g), (test_p, test_g) = cal_test(scale)
+    g = RiskConformal(0.1)
+    g.fit(cal_p, cal_g)
+    assert automation(g, test_p) > 0.8 and autonomous_error(g, test_p, test_g) <= 0.12
+
+
+def test_risk_conformal_threshold_maximises_automation_among_feasible():
+    # bound .75/.5/.25 on q<.6/<.7/≥.7; singletons on grid 0,.2,.3,.4,.6,.7,.8 = 0,1,2,3,2,1,0
+    cal = ([{"a": 0.7, "b": 0.3}, {"a": 0.6, "b": 0.4}, {"a": 0.8, "b": 0.2}], ["b", "b", "a"])
+    for eps, q in [(0.8, 0.4), (0.55, 0.6), (0.3, 0.7)]:
+        g = RiskConformal(eps)
+        g.fit(*cal)
+        assert g.q == pytest.approx(q)
+
+
+@pytest.mark.parametrize("n", [0, 20])
+def test_risk_conformal_full_set_when_infeasible(n):
+    g = RiskConformal(0.001)
+    g.fit([TWO] * n, ["a"] * n)
+    assert g.q == math.inf
+    assert view(g.decide({"b": 0.1, "a": 0.9})) == ("escalate", None, ["a", "b"])
+
+
+def test_adaptive_risk_alpha_rises_without_errors(data):
+    g = AdaptiveRisk(0.1)
+    g.fit(*data[0])
+    for _ in range(50):
+        g.update(SURE, "a")
+    assert g.alpha == pytest.approx(0.2)
+    for _ in range(20):
+        g.update(SURE, "b", weight=5.0)
+    assert g.alpha < 0.2
+
+
+def test_adaptive_risk_weight_zero_only_drifts(data):
+    g = AdaptiveRisk(0.1)
+    g.fit(*data[0])
+    assert view(g.decide(SURE)) == ("act", "a", ["a"])
+    g.update(SURE, "b", weight=0.0)
+    assert g.alpha == pytest.approx(0.1 + 0.02 * 0.1)
+
+
+def test_adaptive_risk_alpha_floor_escalates_full_set(data):
+    g = AdaptiveRisk(0.1)
+    g.fit(*data[0])
+    g.update(SURE, "b", weight=100)
+    assert g.alpha == 0.001
+    assert view(g.decide(SURE)) == ("escalate", None, ["a", "b", "c"])
+
+
+def test_adaptive_risk_q_lookup_matches_risk_conformal_at_eps(data):
+    risk, adaptive = RiskConformal(0.1), AdaptiveRisk(0.1)
+    risk.fit(*data[0])
+    adaptive.fit(*data[0])
+    assert adaptive.alpha == 0.1 and adaptive._q() == risk.q < math.inf
