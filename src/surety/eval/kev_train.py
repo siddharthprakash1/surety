@@ -9,7 +9,7 @@ QID = {"action_prediction": "action", "element_grounding": "element"}
 
 
 def build_records(instances: list[Instance], plan: dict, n_train: int, n_heldout: int, seed: int,
-                  max_options: int = 64) -> tuple[list[dict], list[dict]]:
+                  max_options: int = 64, heldout_site_cap: int = 60) -> tuple[list[dict], list[dict]]:
     sites = set(plan["cal_sites"]) - set(plan["held_sites"])
     excluded = set(plan["cal"]) | set(plan["test_in"]) | set(plan["test_shift"])
     by_site: dict[str, list[Instance]] = {}
@@ -19,23 +19,24 @@ def build_records(instances: list[Instance], plan: dict, n_train: int, n_heldout
     rng = random.Random(seed)
     order = sorted(by_site)
     rng.shuffle(order)
-    held, count = set(), 0
+    held, count = [], 0
     for s in order:
         if count >= n_heldout:
             break
-        held.add(s)
-        count += len(by_site[s])
+        held.append(s)
+        count += min(len(by_site[s]), heldout_site_cap)
 
-    def draw(site_set: set[str], n: int) -> list[dict]:
+    def pools(insts: list[Instance]) -> list[list[Instance]]:
         by_type: dict[str, list[Instance]] = {}
-        for s in sorted(site_set):
-            for i in by_site[s]:
-                by_type.setdefault(i.task_type, []).append(i)
-        pools = [rng.sample(sorted(p, key=lambda i: i.id), len(p)) for _, p in sorted(by_type.items())]
-        return [_record(i) for i in draw_balanced(pools, n)]
+        for i in sorted(insts, key=lambda i: i.id):
+            by_type.setdefault(i.task_type, []).append(i)
+        return [rng.sample(p, len(p)) for _, p in sorted(by_type.items())]
 
-    heldout = draw(held, n_heldout)
-    return draw(set(by_site) - held, n_train), heldout
+    capped = [i for s in held for i in draw_balanced(pools(by_site[s]), heldout_site_cap)]
+    heldout = draw_balanced(pools(capped), n_heldout)
+    rest = set(by_site) - set(held)
+    train = draw_balanced(pools([i for s in rest for i in by_site[s]]), n_train)
+    return [_record(i) for i in train], [_record(i) for i in heldout]
 
 
 def _record(inst: Instance) -> dict:

@@ -60,10 +60,11 @@ def test_build_records_heldout_sites_disjoint_from_train_sites():
     sites = [f"s{k}.com" for k in range(6)]
     insts = _pool(sites, 4)
     site_of = {i.id: i.site for i in insts}
-    train, heldout = build_records(insts, _plan(sites, []), n_train=100, n_heldout=10, seed=0)
+    train, heldout = build_records(insts, _plan(sites, []), n_train=100, n_heldout=10, seed=0, heldout_site_cap=3)
     train_sites, heldout_sites = {site_of[i] for i in _ids(train)}, {site_of[i] for i in _ids(heldout)}
-    assert len(heldout) == 10 and len(train) == 32
-    assert len(train_sites) == 4 and train_sites.isdisjoint(heldout_sites)
+    assert len(heldout) == 10 and len(train) == 16
+    assert len(train_sites) == 2 and train_sites.isdisjoint(heldout_sites)
+    assert max(Counter(site_of[i] for i in _ids(heldout)).values()) <= 3
 
 
 def test_build_records_shape_matches_kev_format(tmp_path):
