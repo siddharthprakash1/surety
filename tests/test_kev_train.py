@@ -48,16 +48,27 @@ def test_build_records_excludes_plan_ids_and_held_sites():
     insts = _pool(["a.com", "b.com", "h.com"], 4) + [_inst("big", "a.com", AP, AP_OPTIONS * 30)]
     plan = _plan(["a.com", "b.com"], ["h.com"], cal=["ac-a.com-0", "el-b.com-1"], test_in=["ac-b.com-2"],
                  test_shift=["ac-h.com-0"])
-    train, heldout = build_records(insts, plan, n_train=100, n_heldout=3, seed=0, max_options=64)
     excluded = {"ac-a.com-0", "el-b.com-1", "ac-b.com-2", "big"}
     eligible = {i.id for i in insts if i.site != "h.com"} - excluded
-    assert len(heldout) == 3 and not set(_ids(train)) & set(_ids(heldout))
-    assert set(_ids(train)) | set(_ids(heldout)) == eligible
+    train, heldout = build_records(insts, plan, n_train=100, n_heldout=0, seed=0, max_options=64)
+    assert set(_ids(train)) == eligible and heldout == []
+    train, heldout = build_records(insts, plan, n_train=100, n_heldout=3, seed=0, max_options=64)
+    assert len(heldout) == 3 and set(_ids(train)) | set(_ids(heldout)) <= eligible
+
+
+def test_build_records_heldout_sites_disjoint_from_train_sites():
+    sites = [f"s{k}.com" for k in range(6)]
+    insts = _pool(sites, 4)
+    site_of = {i.id: i.site for i in insts}
+    train, heldout = build_records(insts, _plan(sites, []), n_train=100, n_heldout=10, seed=0)
+    train_sites, heldout_sites = {site_of[i] for i in _ids(train)}, {site_of[i] for i in _ids(heldout)}
+    assert len(heldout) == 10 and len(train) == 32
+    assert len(train_sites) == 4 and train_sites.isdisjoint(heldout_sites)
 
 
 def test_build_records_shape_matches_kev_format(tmp_path):
-    insts = _pool(["a.com"], 3)
-    train, heldout = build_records(insts, _plan(["a.com"], []), n_train=4, n_heldout=2, seed=0)
+    insts = _pool(["a.com", "b.com"], 3)
+    train, heldout = build_records(insts, _plan(["a.com", "b.com"], []), n_train=4, n_heldout=2, seed=0)
     by_id = {i.id: i for i in insts}
     for r in train + heldout:
         assert set(r) == {"state", "questions", "_meta"}

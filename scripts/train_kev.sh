@@ -5,7 +5,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 KEV="$ROOT/third_party/kev"
 OUT="$ROOT/runs/kev_ft"
-PORT=8011
+PORT="${KEV_PORT:-8011}"
 [[ -f "$OUT/train.jsonl" && -f "$OUT/heldout.jsonl" ]] || { echo "run scripts/make_kev_train.py first" >&2; exit 1; }
 cd "$KEV"
 
@@ -17,13 +17,18 @@ uv run python -m kev.train --data "$OUT/train.jsonl" --base Qwen/Qwen3.5-4B-Base
     --device mps --out "$OUT/run" "$@"
 
 # kev.benchmark --run scores --data within the 384-token training context and skips the rest, so score through the server.
+SERVER=""
+trap '[[ -n "$SERVER" ]] && kill -- -"$SERVER" 2>/dev/null || true' EXIT
+set -m   # own process group, so the trap also stops python under uv
 uv run --extra serve python -m kev.serve --run "$OUT/run" --port "$PORT" > "$OUT/serve-eval.log" 2>&1 &
 SERVER=$!
-trap 'kill "$SERVER" 2>/dev/null || true' EXIT
-until curl -sf "http://127.0.0.1:$PORT/v1/models" > /dev/null; do
+set +m
+for _ in $(seq 120); do
+    curl -sf -m 5 "http://127.0.0.1:$PORT/v1/models" > /dev/null && break
     kill -0 "$SERVER" 2>/dev/null || { echo "server exited; see $OUT/serve-eval.log" >&2; exit 1; }
     sleep 5
 done
+curl -sf -m 5 "http://127.0.0.1:$PORT/v1/models" > /dev/null || { echo "server not ready after 10 min" >&2; exit 1; }
 uv run python -m kev.benchmark --remote "http://127.0.0.1:$PORT" --data "$OUT/heldout.jsonl" --out "$OUT/eval"
 
 echo "serve the fine-tuned checkpoint:"

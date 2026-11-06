@@ -2,7 +2,7 @@ import json
 import random
 from pathlib import Path
 
-from surety.eval.webjev import _draw, compile_instance
+from surety.eval.webjev import compile_instance, draw_balanced
 from surety.types import Instance
 
 QID = {"action_prediction": "action", "element_grounding": "element"}
@@ -12,14 +12,30 @@ def build_records(instances: list[Instance], plan: dict, n_train: int, n_heldout
                   max_options: int = 64) -> tuple[list[dict], list[dict]]:
     sites = set(plan["cal_sites"]) - set(plan["held_sites"])
     excluded = set(plan["cal"]) | set(plan["test_in"]) | set(plan["test_shift"])
-    by_type: dict[str, list[Instance]] = {}
+    by_site: dict[str, list[Instance]] = {}
     for i in instances:
         if i.site in sites and i.id not in excluded and len(i.options) <= max_options:
-            by_type.setdefault(i.task_type, []).append(i)
+            by_site.setdefault(i.site, []).append(i)
     rng = random.Random(seed)
-    pools = [rng.sample(sorted(p, key=lambda i: i.id), len(p)) for _, p in sorted(by_type.items())]
-    picked = [_record(i) for i in _draw(pools, n_train + n_heldout)]
-    return picked[n_heldout:], picked[:n_heldout]
+    order = sorted(by_site)
+    rng.shuffle(order)
+    held, count = set(), 0
+    for s in order:
+        if count >= n_heldout:
+            break
+        held.add(s)
+        count += len(by_site[s])
+
+    def draw(site_set: set[str], n: int) -> list[dict]:
+        by_type: dict[str, list[Instance]] = {}
+        for s in sorted(site_set):
+            for i in by_site[s]:
+                by_type.setdefault(i.task_type, []).append(i)
+        pools = [rng.sample(sorted(p, key=lambda i: i.id), len(p)) for _, p in sorted(by_type.items())]
+        return [_record(i) for i in draw_balanced(pools, n)]
+
+    heldout = draw(held, n_heldout)
+    return draw(set(by_site) - held, n_train), heldout
 
 
 def _record(inst: Instance) -> dict:
