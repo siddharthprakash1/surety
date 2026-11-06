@@ -5,6 +5,7 @@ from pathlib import Path
 from surety.eval.analyze import (
     SPLITS,
     TAIL,
+    ablation_table,
     aci_simulation,
     h1_table,
     h2_table,
@@ -20,6 +21,7 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--collect", type=Path, required=True)
     ap.add_argument("--out", type=Path, required=True)
+    ap.add_argument("--ablation", type=Path, help="full-mode collection to compare on shared ids")
     args = ap.parse_args()
 
     rows = load_collection(args.collect)
@@ -37,8 +39,11 @@ def main() -> None:
         "## H2: gates fitted on cal (debiased+T)", h2_table(rows, EPS, vs=vs),
         *(f"## H2: adaptive gates on test_shift, eps={eps} (tail = last {TAIL} steps)\n\n"
           f"{aci_simulation(rows, eps, vs=vs)}" for eps in EPS),
-        f"![risk-coverage]({png.name})",
     ]
+    if args.ablation:
+        parts += [f"## Ablation: compact vs full (`{args.ablation.name}`, shared ids, debiased)",
+                  ablation_table(rows, load_collection(args.ablation))]
+    parts.append(f"![risk-coverage]({png.name})")
     args.out.write_text("\n\n".join(parts) + "\n")
 
 
