@@ -138,14 +138,30 @@ class SplitConformal(_Static):
         return _escalate(c, "set" if c else "empty_set")
 
 
-class AdaptiveConformal(SplitConformal):
+class _OnlineAlpha:
+    # alpha_raw is unclipped so a weighted correction past alpha_min/alpha_max is not lost
+    eps: float
+    gamma: float
+    alpha_min: float
+    alpha_max: float
+    alpha_raw: float
+
+    @property
+    def alpha(self) -> float:
+        return min(max(self.alpha_raw, self.alpha_min), self.alpha_max)
+
+    def _aci_step(self, loss: float, weight: float) -> None:
+        self.alpha_raw += self.gamma * (self.eps - weight * loss)
+
+
+class AdaptiveConformal(_OnlineAlpha, SplitConformal):
     def __init__(self, eps: float, gamma: float = 0.02, alpha_min: float = 0.001, alpha_max: float = 0.5):
         super().__init__(eps)
         self.name = f"aci@{eps}"
         self.gamma = gamma
         self.alpha_min = alpha_min
         self.alpha_max = alpha_max
-        self.alpha = eps
+        self.alpha_raw = eps
 
     def _q(self) -> float:
         if self.alpha <= self.alpha_min or not len(self.scores):
@@ -153,12 +169,7 @@ class AdaptiveConformal(SplitConformal):
         return _quantile(self.scores, 1 - self.alpha)
 
     def update(self, probs: dict[str, float], gold: str, weight: float = 1.0) -> None:
-        self.alpha = _aci_step(self, float(gold not in self.prediction_set(probs)), weight)
-
-
-def _aci_step(policy: "AdaptiveConformal | AdaptiveRisk", loss: float, weight: float) -> float:
-    alpha = policy.alpha + policy.gamma * (policy.eps - weight * loss)
-    return min(max(alpha, policy.alpha_min), policy.alpha_max)
+        self._aci_step(float(gold not in self.prediction_set(probs)), weight)
 
 
 def _singleton_span(probs: dict[str, float]) -> tuple[float, float]:
@@ -202,18 +213,18 @@ class RiskConformal(SplitConformal):
         return float(self.grid[np.argmax(np.where(feasible, self.auto, -1))])
 
 
-class AdaptiveRisk(RiskConformal):
+class AdaptiveRisk(_OnlineAlpha, RiskConformal):
     def __init__(self, eps: float, gamma: float = 0.02, alpha_min: float = 0.001, alpha_max: float = 0.5):
         super().__init__(eps)
         self.name = f"arisk@{eps}"
         self.gamma = gamma
         self.alpha_min = alpha_min
         self.alpha_max = alpha_max
-        self.alpha = eps
+        self.alpha_raw = eps
 
     def _q(self) -> float:
         return math.inf if self.alpha <= self.alpha_min else self._lookup(self.alpha)
 
     def update(self, probs: dict[str, float], gold: str, weight: float = 1.0) -> None:
         c = self.prediction_set(probs)
-        self.alpha = _aci_step(self, float(len(c) == 1 and gold not in c), weight)
+        self._aci_step(float(len(c) == 1 and gold not in c), weight)
