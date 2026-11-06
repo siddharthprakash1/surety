@@ -1,0 +1,30 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "surety-cua"
+version = "0.0.1"
+description = "Computer-use agent harness with guaranteed escalation: a local decision model acts, a reasoning LLM supervises, conformal gates decide who."
+readme = "README.md"
+license = "Apache-2.0"
+requires-python = ">=3.12,<3.14"
+dependencies = [
+    "httpx>=0.28",
+    "numpy>=2",
+    "pyarrow>=18",
+    "matplotlib>=3.9",
+]
+
+[project.optional-dependencies]
+live = ["playwright>=1.50", "browsergym-core>=0.13"]
+
+[dependency-groups]
+dev = ["pytest>=8", "pytest-httpx>=0.35"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/surety"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = ["live: needs running model servers or a browser"]

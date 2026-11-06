@@ -1,0 +1,11 @@
+data/
+runs/
+third_party/
+.venv/
+__pycache__/
+*.pyc
+*.jsonl
+results/**/*.png
+.pytest_cache/
+.DS_Store
+.env
