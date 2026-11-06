@@ -47,6 +47,18 @@ wheels = [
 ]
 
 [[package]]
+name = "browsergym-miniwob"
+version = "0.13.3"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "browsergym-core" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/a8/67/461f5c75a08c61a6d4aca46098edb8d93767e3552c7daabb5456be1d2423/browsergym_miniwob-0.13.3.tar.gz", hash = "sha256:0e22797a83d4664636364b2400c5ea0eca16ddd3f50d3003891b0892da1ff40e", size = 8918, upload-time = "2024-11-27T19:55:56.128Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/80/da/f337c0e7b710d8211467f897aab6ccdb25c88eee3717fc36d3c6b335efcb/browsergym_miniwob-0.13.3-py3-none-any.whl", hash = "sha256:353b9f8849b7f637e17a928021a93ce962ca9b828434cfe68cebdbe2f11f4a2f", size = 9114, upload-time = "2024-11-27T19:55:47.903Z" },
+]
+
+[[package]]
 name = "certifi"
 version = "2026.10.23"
 source = { registry = "https://pypi.org/simple" }
@@ -588,6 +600,8 @@ dependencies = [
 [package.optional-dependencies]
 live = [
     { name = "browsergym-core" },
+    { name = "browsergym-miniwob" },
+    { name = "gymnasium" },
     { name = "playwright" },
 ]
 
@@ -600,6 +614,8 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "browsergym-core", marker = "extra == 'live'", specifier = ">=0.13" },
+    { name = "browsergym-miniwob", marker = "extra == 'live'", specifier = ">=0.13" },
+    { name = "gymnasium", marker = "extra == 'live'", specifier = ">=0.29" },
     { name = "httpx", specifier = ">=0.28" },
     { name = "matplotlib", specifier = ">=3.9" },
     { name = "numpy", specifier = ">=2" },

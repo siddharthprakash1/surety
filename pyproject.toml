@@ -17,7 +17,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-live = ["playwright>=1.50", "browsergym-core>=0.13"]
+live = ["playwright>=1.50", "browsergym-core>=0.13", "browsergym-miniwob>=0.13", "gymnasium>=0.29"]
 
 [dependency-groups]
 dev = ["pytest>=8", "pytest-httpx>=0.35"]

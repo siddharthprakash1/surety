@@ -4,7 +4,7 @@ from dataclasses import dataclass
 
 import httpx
 
-from surety.supervise.prompts import build_choose_prompt
+from surety.supervise.prompts import build_choose_prompt, build_slot_prompt
 from surety.types import DecisionState
 
 
@@ -33,11 +33,10 @@ class Supervisor:
         self.max_tokens = max_tokens
         self.temperature = temperature
 
-    def choose(self, state: DecisionState, candidate_ids: list[str] | None = None) -> tuple[str | None, Usage]:
-        allowed = candidate_ids if candidate_ids is not None else [o.id for o in state.options]
+    def _complete(self, messages: list[dict]) -> tuple[str, Usage]:
         payload = {
             "model": self.model,
-            "messages": build_choose_prompt(state, candidate_ids),
+            "messages": messages,
             "max_tokens": self.max_tokens,
             "temperature": self.temperature,
         }
@@ -48,15 +47,27 @@ class Supervisor:
         body = r.json()
         u = body.get("usage") or {}
         usage = Usage(u.get("prompt_tokens", 0), u.get("completion_tokens", 0), latency)
-        text = body["choices"][0]["message"]["content"] or ""
+        return body["choices"][0]["message"]["content"] or "", usage
+
+    def choose(self, state: DecisionState, candidate_ids: list[str] | None = None) -> tuple[str | None, Usage]:
+        allowed = candidate_ids if candidate_ids is not None else [o.id for o in state.options]
+        text, usage = self._complete(build_choose_prompt(state, candidate_ids))
         return _parse(text, allowed), usage
+
+    def slot_value(self, state: DecisionState, element_id: str) -> str | None:
+        text, _ = self._complete(build_slot_prompt(state, element_id))
+        return text.strip() or None
 
 
 class MockSupervisor:
-    def __init__(self, answer: str | None):
+    def __init__(self, answer: str | None, slots: dict[str, str] | None = None):
         self.answer = answer
+        self.slots = slots or {}
         self.calls = 0
 
     def choose(self, state: DecisionState, candidate_ids: list[str] | None = None) -> tuple[str | None, Usage]:
         self.calls += 1
         return self.answer, Usage(0, 0, 0.0)
+
+    def slot_value(self, state: DecisionState, element_id: str) -> str | None:
+        return self.slots.get(element_id)
