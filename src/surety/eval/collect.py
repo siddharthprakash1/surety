@@ -78,4 +78,6 @@ def collect(instances: list[Instance], backend: Backend, mode: str, n_perm: int,
                 print(f"{written} rows, {skipped} skipped, mean latency {lat / max(written, 1):.0f} ms, "
                       f"{time.time() - t0:.0f}s", file=sys.stderr)
     print(f"written {written}, skipped {skipped}", file=sys.stderr)
+    if written == 0 and skipped:
+        raise CollectAborted(f"every instance failed ({skipped} skipped)")
     return written

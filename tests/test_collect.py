@@ -88,3 +88,11 @@ def test_collect_uses_fewer_perms_for_large(tmp_path):
     out = tmp_path / "o.jsonl"
     collect([big, inst(1)], MockBackend(), "full", 5, out, {"i0": "cal", "i1": "cal"}, n_perm_large=2, large_options=3)
     assert [x["n_perm"] for x in rows(out)] == [2, 5]
+
+
+def test_collect_raises_when_all_fail(tmp_path):
+    def fn(state):
+        raise httpx.ConnectError("down")
+
+    with pytest.raises(CollectAborted):
+        collect([inst(0)], MockBackend(fn), "full", 1, tmp_path / "o.jsonl", {"i0": "cal"})
