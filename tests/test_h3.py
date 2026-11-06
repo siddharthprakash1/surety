@@ -9,16 +9,17 @@ def _row(i, split, tt, k, gold="o0"):
             "probs": p, "runs": [p]}
 
 
-def _res(cond, correct, pt, in_set=True, tt="action_prediction"):
-    return {"id": "x", "cond": cond, "task_type": tt, "correct": correct, "gold_in_set": in_set,
-            "prompt_tokens": pt, "completion_tokens": 10, "latency_ms": 100.0}
+def _res(cond, correct, pt, in_set=True, tt="action_prediction", chosen="o0"):
+    return {"id": "x", "cond": cond, "task_type": tt, "chosen": chosen, "correct": correct,
+            "gold_in_set": in_set, "prompt_tokens": pt, "completion_tokens": 10, "latency_ms": 100.0}
 
 
 def test_h3_table_two_conditions():
     rows = [_res("full", True, 1000), _res("full", False, 1000, tt="element_grounding"),
-            _res("set", True, 400), _res("set", True, 600, tt="element_grounding")]
+            _res("set", True, 400), _res("set", False, 600, tt="element_grounding", chosen=None)]
     out = h3_table(rows)
-    assert "| full | 2 | 0.500 |" in out and "| set | 2 | 1.000 |" in out
+    assert "| full | 2 | 0.500 | 0.000 | 0.500 |" in out
+    assert "| set | 2 | 0.500 | 0.500 | 1.000 |" in out
     assert "500.000" in out and "gold_in_set" in out and "element_grounding n=1" in out
 
 

@@ -189,10 +189,13 @@ def h3_table(rows) -> str:
             continue
         ins = [r for r in rs if r["gold_in_set"]]
         mean = lambda k: float(np.mean([r[k] for r in rs]))  # noqa: E731
+        ans = [r for r in rs if r["chosen"] is not None]
         body.append([cond, len(rs), mean("correct"),
+                     1 - len(ans) / len(rs),
+                     float(np.mean([r["correct"] for r in ans])) if ans else float("nan"),
                      float(np.mean([r["correct"] for r in ins])) if ins else float("nan"),
                      mean("prompt_tokens"), mean("completion_tokens"), mean("latency_ms")])
-    table = _table(("cond", "n", "acc", "acc_gold_in_set", "prompt_tok", "completion_tok", "latency_ms"), body)
+    table = _table(("cond", "n", "acc", "abstain", "acc_given_answer", "acc_gold_in_set", "prompt_tok", "completion_tok", "latency_ms"), body)
     sets = [r for r in rows if r["cond"] == "set"] or rows
     types = sorted({r["task_type"] for r in sets})
     per = ", ".join(f"{t} n={sum(r['task_type'] == t for r in sets)}" for t in types)
