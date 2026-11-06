@@ -157,3 +157,44 @@ def risk_coverage_plot(rows, out_png: Path, vs=None) -> None:
     ax.legend(frameon=False)
     Path(out_png).parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(out_png, dpi=150, bbox_inches="tight")
+
+
+def select_escalated(rows, policy, splits, n, seed, probs=None) -> list[tuple[dict, list[str]]]:
+    """Proper-subset sets (2 <= |C| < n_options) on `splits`, sampled to n, balanced across task types."""
+    probs = probs or variants(rows)["debiased+T"]
+    pool: dict[str, list] = {}
+    for r, p in zip(rows, probs):
+        if r["split"] in splits:
+            c = policy.prediction_set(p)
+            if 2 <= len(c) < len(r["option_ids"]):
+                pool.setdefault(r["task_type"], []).append((r, c))
+    rng = random.Random(seed)
+    for v in pool.values():
+        rng.shuffle(v)
+    types = sorted(pool)
+    picked, quota = [], {t: n // max(len(types), 1) for t in types}
+    for t in types:
+        picked += pool[t][:quota[t]]
+    rest = [x for t in types for x in pool[t][quota[t]:]]
+    rng.shuffle(rest)
+    picked += rest[: n - len(picked)]
+    return picked
+
+
+def h3_table(rows) -> str:
+    body = []
+    for cond in ("full", "set"):
+        rs = [r for r in rows if r["cond"] == cond]
+        if not rs:
+            continue
+        ins = [r for r in rs if r["gold_in_set"]]
+        mean = lambda k: float(np.mean([r[k] for r in rs]))  # noqa: E731
+        body.append([cond, len(rs), mean("correct"),
+                     float(np.mean([r["correct"] for r in ins])) if ins else float("nan"),
+                     mean("prompt_tokens"), mean("completion_tokens"), mean("latency_ms")])
+    table = _table(("cond", "n", "acc", "acc_gold_in_set", "prompt_tok", "completion_tok", "latency_ms"), body)
+    sets = [r for r in rows if r["cond"] == "set"] or rows
+    types = sorted({r["task_type"] for r in sets})
+    per = ", ".join(f"{t} n={sum(r['task_type'] == t for r in sets)}" for t in types)
+    return (table + f"\ngold_in_set (LAC coverage on escalated rows): "
+            f"{float(np.mean([r['gold_in_set'] for r in sets])):.3f}; {per}\n")

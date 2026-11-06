@@ -8,6 +8,7 @@ from surety.eval.analyze import (
     aci_simulation,
     h1_table,
     h2_table,
+    h3_table,
     load_collection,
     risk_coverage_plot,
     variants,
@@ -19,6 +20,7 @@ EPS = (0.05, 0.1)
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--collect", type=Path, required=True)
+    ap.add_argument("--h3", type=Path)
     ap.add_argument("--out", type=Path, required=True)
     args = ap.parse_args()
 
@@ -39,6 +41,8 @@ def main() -> None:
           f"{aci_simulation(rows, eps, vs=vs)}" for eps in EPS),
         f"![risk-coverage]({png.name})",
     ]
+    if args.h3:
+        parts += ["## H3: supervisor on full list vs conformal set", h3_table(load_collection(args.h3))]
     args.out.write_text("\n\n".join(parts) + "\n")
 
 
