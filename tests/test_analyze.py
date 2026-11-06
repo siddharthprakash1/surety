@@ -65,6 +65,13 @@ def test_load_collection_reads_jsonl(tmp_path):
     assert load_collection(path) == rows
 
 
+def test_load_collection_keeps_unterminated_complete_line(tmp_path):
+    rows = synthetic_rows(3, 0)
+    path = tmp_path / "c.jsonl"
+    path.write_text("\n".join(json.dumps(r) for r in rows))
+    assert load_collection(path) == rows
+
+
 def test_variants_requires_cal_split():
     with pytest.raises(ValueError, match="no cal split"):
         variants([r for r in synthetic_rows(3, 0) if r["split"] != "cal"])

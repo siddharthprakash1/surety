@@ -22,9 +22,18 @@ TAIL = 200
 
 
 def load_collection(path: Path) -> list[dict]:
+    rows = []
     with open(path) as f:
-        # an unterminated last line is a row still being written by a live collection
-        return [json.loads(line) for line in f if line.endswith("\n") and line.strip()]
+        for line in f:
+            if not line.strip():
+                continue
+            try:
+                rows.append(json.loads(line))
+            except json.JSONDecodeError:
+                # a live collection may still be writing its last line
+                if line.endswith("\n"):
+                    raise
+    return rows
 
 
 def _split(rows, probs, split):
