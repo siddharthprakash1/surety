@@ -265,3 +265,17 @@ def test_adaptive_risk_update_uses_literal_loss():
         g.update(probs, gold)
         alphas.append(g.alpha)
     assert alphas == pytest.approx([0.388, 0.396, 0.404])
+
+
+@pytest.mark.parametrize("cls", [AdaptiveConformal, AdaptiveRisk])
+def test_adaptive_alpha_raw_keeps_correction_below_floor(cls):
+    g = cls(0.05)
+    g.fit(*CAL_TWO)
+    g.update(TWO, "b", weight=5.0)
+    assert g.alpha_raw == pytest.approx(0.05 + 0.02 * (0.05 - 5)) and g.alpha == g.alpha_min
+    raws, alphas = [], []
+    for _ in range(10):
+        g.update(TWO, "a")
+        raws.append(g.alpha_raw)
+        alphas.append(g.alpha)
+    assert raws == pytest.approx([-0.049 + 0.001 * k for k in range(1, 11)]) and alphas == [g.alpha_min] * 10
