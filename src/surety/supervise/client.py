@@ -14,15 +14,22 @@ class Usage:
     completion_tokens: int
     latency_ms: float
     fallback_parsed: bool = False
+    abstained: bool = False
 
 
-def _parse(text: str, allowed: list[str]) -> str | None:
+def _pattern(allowed: list[str]) -> str:
+    return "|".join(re.escape(i) for i in sorted(allowed, key=len, reverse=True))
+
+
+def _parse(text: str, allowed: list[str], last: bool = False) -> str | None:
     if not allowed:
         return None
-    ids = sorted(allowed, key=len, reverse=True)
-    pat = "|".join(re.escape(i) for i in ids)
-    m = re.search(rf"(?<![\w-])(?:{pat})(?![\w-])", text)
-    return m.group(0) if m else None
+    found = re.findall(rf"(?<![\w-])(?:{_pattern(allowed)})(?![\w-])", text)
+    return (found[-1] if last else found[0]) if found else None
+
+
+def _is_none(text: str) -> bool:
+    return re.search(r"(?<![\w-])NONE(?![\w-])", text) is not None
 
 
 class Supervisor:
@@ -53,13 +60,18 @@ class Supervisor:
         body = r.json()
         u = body.get("usage") or {}
         usage = Usage(u.get("prompt_tokens", 0), u.get("completion_tokens", 0), latency)
-        msg = body["choices"][0]["message"]
+        choice = body["choices"][0]
+        msg = choice["message"]
         text = msg.get("content") or ""
+        last = False
         if not text.strip():
             think = msg.get("reasoning") or msg.get("reasoning_content") or ""
-            usage.fallback_parsed = bool(think.strip())
-            text = think[-200:]
-        return _parse(text, allowed), usage
+            if think.strip() and choice.get("finish_reason") != "length":
+                usage.fallback_parsed = True
+                text, last = think[-200:], True
+        chosen = _parse(text, allowed, last)
+        usage.abstained = chosen is None and _is_none(text)
+        return chosen, usage
 
 
 class MockSupervisor:

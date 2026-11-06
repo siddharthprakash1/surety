@@ -12,7 +12,12 @@ from surety.supervise.client import Supervisor
 def run(pairs, by_id, sup, out: Path, log=sys.stderr) -> None:
     done = set()
     if out.exists():
-        done = {(r["id"], r["cond"]) for r in map(json.loads, filter(str.strip, out.read_text().splitlines()))}
+        for line in out.read_text().splitlines():
+            try:
+                r = json.loads(line)
+            except json.JSONDecodeError:
+                continue  # half-written last line
+            done.add((r["id"], r["cond"]))
     out.parent.mkdir(parents=True, exist_ok=True)
     with open(out, "a") as f:
         for k, (r, c) in enumerate(pairs, 1):
@@ -30,7 +35,8 @@ def run(pairs, by_id, sup, out: Path, log=sys.stderr) -> None:
                     "set_size": len(c), "n_options": len(r["option_ids"]), "gold_id": r["gold_id"],
                     "chosen": chosen, "correct": chosen == r["gold_id"], "gold_in_set": r["gold_id"] in c,
                     "prompt_tokens": u.prompt_tokens, "completion_tokens": u.completion_tokens,
-                    "latency_ms": u.latency_ms, "fallback_parsed": u.fallback_parsed}) + "\n")
+                    "latency_ms": u.latency_ms, "fallback_parsed": u.fallback_parsed,
+                    "abstained": u.abstained}) + "\n")
                 f.flush()
             if k % 10 == 0:
                 print(f"{k}/{len(pairs)}", file=log)
@@ -40,7 +46,6 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--collect", type=Path, required=True)
     ap.add_argument("--root", type=Path, default=Path("data/webjev"))
-    ap.add_argument("--plan", type=Path)  # unused: ids come from the collection
     ap.add_argument("--eps", type=float, default=0.1)
     ap.add_argument("--n", type=int, default=300)
     ap.add_argument("--splits", default="test_in,test_shift")

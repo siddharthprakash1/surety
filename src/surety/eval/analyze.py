@@ -160,24 +160,23 @@ def risk_coverage_plot(rows, out_png: Path, vs=None) -> None:
 
 
 def select_escalated(rows, policy, splits, n, seed, probs=None) -> list[tuple[dict, list[str]]]:
-    """Proper-subset sets (2 <= |C| < n_options) on `splits`, sampled to n, balanced across task types."""
+    """Proper-subset sets (2 <= |C| < n_options) on `splits`, round-robin over (split, task_type) strata."""
     probs = probs or variants(rows)["debiased+T"]
-    pool: dict[str, list] = {}
+    pool: dict[tuple, list] = {}
     for r, p in zip(rows, probs):
         if r["split"] in splits:
             c = policy.prediction_set(p)
             if 2 <= len(c) < len(r["option_ids"]):
-                pool.setdefault(r["task_type"], []).append((r, c))
+                pool.setdefault((r["split"], r["task_type"]), []).append((r, c))
     rng = random.Random(seed)
-    for v in pool.values():
-        rng.shuffle(v)
-    types = sorted(pool)
-    picked, quota = [], {t: n // max(len(types), 1) for t in types}
-    for t in types:
-        picked += pool[t][:quota[t]]
-    rest = [x for t in types for x in pool[t][quota[t]:]]
-    rng.shuffle(rest)
-    picked += rest[: n - len(picked)]
+    queues = [pool[k] for k in sorted(pool)]
+    for q in queues:
+        rng.shuffle(q)
+    picked = []
+    while len(picked) < n and any(queues):
+        for q in queues:
+            if q and len(picked) < n:
+                picked.append(q.pop())
     return picked
 
 
@@ -190,12 +189,16 @@ def h3_table(rows) -> str:
         ins = [r for r in rs if r["gold_in_set"]]
         mean = lambda k: float(np.mean([r[k] for r in rs]))  # noqa: E731
         ans = [r for r in rs if r["chosen"] is not None]
+        rate = lambda f: float(np.mean([f(r) for r in rs]))  # noqa: E731
+        # rows written before `abstained` existed: a null choice counts as abstention
+        abstain = lambda r: r["chosen"] is None and r.get("abstained", True)  # noqa: E731
         body.append([cond, len(rs), mean("correct"),
-                     1 - len(ans) / len(rs),
+                     rate(abstain), rate(lambda r: r["chosen"] is None and not abstain(r)),
+                     rate(lambda r: r.get("fallback_parsed", False)),
                      float(np.mean([r["correct"] for r in ans])) if ans else float("nan"),
                      float(np.mean([r["correct"] for r in ins])) if ins else float("nan"),
                      mean("prompt_tokens"), mean("completion_tokens"), mean("latency_ms")])
-    table = _table(("cond", "n", "acc", "abstain", "acc_given_answer", "acc_gold_in_set", "prompt_tok", "completion_tok", "latency_ms"), body)
+    table = _table(("cond", "n", "acc", "abstain", "unparsed", "fallback", "acc_given_answer", "acc_gold_in_set", "prompt_tok", "completion_tok", "latency_ms"), body)
     sets = [r for r in rows if r["cond"] == "set"] or rows
     types = sorted({r["task_type"] for r in sets})
     per = ", ".join(f"{t} n={sum(r['task_type'] == t for r in sets)}" for t in types)

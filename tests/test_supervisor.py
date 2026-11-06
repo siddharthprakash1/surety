@@ -78,3 +78,19 @@ def test_empty_content_falls_back_to_reasoning_tail(httpx_mock):
     httpx_mock.add_response(url="http://sup/v1/chat/completions", json=body)
     chosen, usage = _sup().choose(_state())
     assert chosen == "b2" and usage.fallback_parsed
+
+
+def test_fallback_takes_last_id_and_skips_truncated(httpx_mock):
+    reply = {"choices": [{"message": {"content": "", "reasoning": "a1 no, b2 hmm, finally c3"}}]}
+    httpx_mock.add_response(url="http://sup/v1/chat/completions", json=reply)
+    assert _sup().choose(_state())[0] == "c3"
+    reply["choices"][0]["finish_reason"] = "length"
+    httpx_mock.add_response(url="http://sup/v1/chat/completions", json=reply)
+    chosen, usage = _sup().choose(_state())
+    assert chosen is None and not usage.fallback_parsed and not usage.abstained
+
+
+def test_explicit_none_is_abstention(httpx_mock):
+    _reply(httpx_mock, "NONE")
+    chosen, usage = _sup().choose(_state())
+    assert chosen is None and usage.abstained
