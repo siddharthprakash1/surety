@@ -13,6 +13,7 @@ class Usage:
     prompt_tokens: int
     completion_tokens: int
     latency_ms: float
+    fallback_parsed: bool = False
 
 
 def _parse(text: str, allowed: list[str]) -> str | None:
@@ -26,18 +27,22 @@ def _parse(text: str, allowed: list[str]) -> str | None:
 
 class Supervisor:
     def __init__(self, base_url: str, model: str, timeout: float = 300.0,
-                 max_tokens: int = 64, temperature: float = 0.0):
+                 max_tokens: int = 64, temperature: float = 0.0, reasoning: str | None = None):
         self.base_url = base_url.rstrip("/")
         self.model = model
         self.timeout = timeout
         self.max_tokens = max_tokens
         self.temperature = temperature
+        self.reasoning = reasoning
 
     def choose(self, state: DecisionState, candidate_ids: list[str] | None = None) -> tuple[str | None, Usage]:
         allowed = candidate_ids if candidate_ids is not None else [o.id for o in state.options]
+        messages = build_choose_prompt(state, candidate_ids)
+        if self.reasoning:
+            messages[0]["content"] = f"Reasoning: {self.reasoning}\n{messages[0]['content']}"
         payload = {
             "model": self.model,
-            "messages": build_choose_prompt(state, candidate_ids),
+            "messages": messages,
             "max_tokens": self.max_tokens,
             "temperature": self.temperature,
         }
@@ -48,7 +53,12 @@ class Supervisor:
         body = r.json()
         u = body.get("usage") or {}
         usage = Usage(u.get("prompt_tokens", 0), u.get("completion_tokens", 0), latency)
-        text = body["choices"][0]["message"]["content"] or ""
+        msg = body["choices"][0]["message"]
+        text = msg.get("content") or ""
+        if not text.strip():
+            think = msg.get("reasoning") or msg.get("reasoning_content") or ""
+            usage.fallback_parsed = bool(think.strip())
+            text = think[-200:]
         return _parse(text, allowed), usage
 
 

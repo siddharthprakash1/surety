@@ -30,7 +30,7 @@ def run(pairs, by_id, sup, out: Path, log=sys.stderr) -> None:
                     "set_size": len(c), "n_options": len(r["option_ids"]), "gold_id": r["gold_id"],
                     "chosen": chosen, "correct": chosen == r["gold_id"], "gold_in_set": r["gold_id"] in c,
                     "prompt_tokens": u.prompt_tokens, "completion_tokens": u.completion_tokens,
-                    "latency_ms": u.latency_ms}) + "\n")
+                    "latency_ms": u.latency_ms, "fallback_parsed": u.fallback_parsed}) + "\n")
                 f.flush()
             if k % 10 == 0:
                 print(f"{k}/{len(pairs)}", file=log)
@@ -47,7 +47,8 @@ def main() -> None:
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--base-url", default="http://127.0.0.1:11434")
     ap.add_argument("--model", default="gpt-oss:20b")
-    ap.add_argument("--max-tokens", type=int, default=512)
+    ap.add_argument("--max-tokens", type=int, default=1024)
+    ap.add_argument("--reasoning", choices=["low", "medium", "high"])
     ap.add_argument("--out", type=Path, required=True)
     a = ap.parse_args()
 
@@ -58,7 +59,7 @@ def main() -> None:
     pairs = select_escalated(rows, policy, a.splits.split(","), a.n, a.seed, probs)
     by_id = {i.id: i for i in load_instances(a.root)}
     print(f"{len(pairs)} escalated rows, q={policy.q:.3f}", file=sys.stderr)
-    run(pairs, by_id, Supervisor(a.base_url, a.model, max_tokens=a.max_tokens), a.out)
+    run(pairs, by_id, Supervisor(a.base_url, a.model, max_tokens=a.max_tokens, reasoning=a.reasoning), a.out)
 
 
 if __name__ == "__main__":

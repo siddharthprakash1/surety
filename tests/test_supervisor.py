@@ -65,3 +65,16 @@ def test_mock_supervisor_counts_calls():
     m = MockSupervisor("a1")
     assert m.choose(_state())[0] == "a1" and m.choose(_state())[0] == "a1"
     assert m.calls == 2
+
+
+def test_reasoning_level_prefixes_system_message(httpx_mock):
+    _reply(httpx_mock, "a1")
+    Supervisor("http://sup", "m", reasoning="low").choose(_state())
+    assert json.loads(httpx_mock.get_request().content)["messages"][0]["content"].startswith("Reasoning: low\n")
+
+
+def test_empty_content_falls_back_to_reasoning_tail(httpx_mock):
+    body = {"choices": [{"message": {"content": "", "reasoning": "a1 maybe " + "x" * 300 + " so b2"}}]}
+    httpx_mock.add_response(url="http://sup/v1/chat/completions", json=body)
+    chosen, usage = _sup().choose(_state())
+    assert chosen == "b2" and usage.fallback_parsed
