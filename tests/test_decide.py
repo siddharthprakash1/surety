@@ -125,3 +125,23 @@ def test_temperature_fit_recovers_sharpening():
     out = ts.apply(probs[0])
     assert sum(out.values()) == pytest.approx(1.0)
     assert max(out.values()) < max(probs[0].values())
+
+
+def test_temperature_fit_is_invariant_to_per_row_ids():
+    rng = np.random.default_rng(1)
+    shared, distinct, gold_s, gold_d = [], [], [], []
+    for n in range(400):
+        logits = rng.normal(size=4)
+        true = np.exp(logits) / np.exp(logits).sum()
+        g = int(rng.choice(4, p=true))
+        sharp = np.exp(3 * logits) / np.exp(3 * logits).sum()
+        shared.append({str(i): float(p) for i, p in enumerate(sharp)})
+        distinct.append({f"{i}_{n}": float(p) for i, p in enumerate(sharp)})
+        gold_s.append(str(g))
+        gold_d.append(f"{g}_{n}")
+    t_s = TemperatureScaler().fit(shared, gold_s)
+    ts = TemperatureScaler()
+    t_d = ts.fit(distinct, gold_d)
+    assert 2.0 < t_s < 4.5 and 2.0 < t_d < 4.5
+    assert abs(t_s - t_d) < 0.8
+    assert sum(ts.apply({"x": 0.7, "y": 0.3}).values()) == pytest.approx(1.0)
