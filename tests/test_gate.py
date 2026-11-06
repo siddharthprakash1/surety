@@ -1,3 +1,5 @@
+import math
+
 import numpy as np
 import pytest
 
@@ -12,6 +14,7 @@ from surety.gate import (
 
 TWO = {"a": 0.9, "b": 0.1}
 CAL_TWO = ([TWO] * 20, ["a"] * 20)
+TENTHS = ([{"a": 1 - i / 10} for i in range(10)], ["a"] * 10)
 
 
 def synthetic(n, rng, k=5):
@@ -56,8 +59,16 @@ def test_fitted_threshold_meets_eps_on_calibration(data):
     assert autonomous_error(g, probs, gold) <= 0.1 < autonomous_error(looser, probs, gold)
 
 
-def test_per_choice_threshold_unseen_id_uses_global(data):
+def test_fitted_threshold_never_acts_when_no_tau_meets_eps():
+    g = FittedThreshold(0.1)
+    g.fit([{"a": 1.0, "b": 0.0}] * 10, ["b"] * 10)
+    assert g.tau == math.inf
+    assert g.decide({"a": 1.0}).action == "escalate"
+
+
+def test_per_choice_threshold_sparse_or_unseen_id_uses_global(data):
     (probs, gold), _ = data
+    probs, gold = probs + [{"rare": 0.9, "x": 0.1}] * 29, gold + ["rare"] * 29
     g, f = PerChoiceThreshold(0.1), FittedThreshold(0.1)
     g.fit(probs, gold)
     f.fit(probs, gold)
@@ -73,6 +84,28 @@ def test_split_conformal_coverage_on_synthetic(data):
     g.fit(cal_p, cal_g)
     coverage = np.mean([y in g.decide(p).candidate_set for p, y in zip(test_p, test_g)])
     assert 0.88 <= coverage <= 0.93
+
+
+def test_conformal_quantile_uses_finite_sample_level():
+    g = SplitConformal(0.2)
+    g.fit(*TENTHS)
+    assert g.q == pytest.approx(0.9)
+
+
+@pytest.mark.parametrize("n", [0, 5])
+def test_conformal_too_few_calibration_items_gives_full_set(n):
+    g = SplitConformal(0.1)
+    g.fit([TWO] * n, ["a"] * n)
+    assert view(g.decide({"b": 0.01, "a": 0.99})) == ("escalate", None, ["a", "b"])
+
+
+def test_adaptive_quantile_uses_level_one_minus_alpha():
+    split, aci = SplitConformal(0.2), AdaptiveConformal(0.2)
+    split.fit(*TENTHS)
+    aci.fit(*TENTHS)
+    probs = {"x": 0.25, "y": 0.15}
+    assert view(aci.decide(probs)) == ("act", "x", ["x"])
+    assert view(split.decide(probs)) == ("escalate", None, ["x", "y"])
 
 
 def test_conformal_single_option_acts(data):

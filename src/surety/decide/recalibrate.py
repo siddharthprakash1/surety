@@ -14,13 +14,12 @@ class TemperatureScaler:
 
     def fit(self, probs: list[dict[str, float]], gold: list[str],
             grid: tuple[float, float, int] = (0.3, 5.0, 60)) -> float:
-        ids = sorted({k for p in probs for k in p})
-        P = np.array([[p.get(k, 0.0) for k in ids] for p in probs])
-        y = np.array([ids.index(g) for g in gold])
+        logs = [np.log(np.clip(np.array(list(p.values())), 1e-6, None)) for p in probs]
+        gi = [list(p).index(g) for p, g in zip(probs, gold)]
 
         def nll(t: float) -> float:
-            q = self._rescale(P, t)
-            return float(-np.log(np.clip(q[np.arange(len(y)), y], 1e-12, None)).mean())
+            return float(np.mean([-(lg[y] / t) + np.logaddexp.reduce(lg / t)
+                                  for lg, y in zip(logs, gi)]))
 
         ts = np.linspace(*grid)
         i = int(np.argmin([nll(t) for t in ts]))

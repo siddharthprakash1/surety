@@ -6,6 +6,7 @@ import numpy as np
 from surety.types import GateDecision
 
 _GRID = np.round(np.arange(0, 1.0001, 0.01), 2)
+MIN_GROUP = 30
 
 
 class GatePolicy(Protocol):
@@ -47,7 +48,7 @@ def _fit_tau(probs: list[dict[str, float]], gold: list[str], eps: float) -> floa
 
 
 def _quantile(scores: np.ndarray, level: float) -> float:
-    return float(np.quantile(scores, min(level, 1.0), method="higher"))
+    return float(np.quantile(scores, level, method="higher"))
 
 
 class _Static:
@@ -103,7 +104,7 @@ class PerChoiceThreshold(_Static):
             ps, gs = groups.setdefault(_top(p)[0], ([], []))
             ps.append(p)
             gs.append(g)
-        self.taus = {o: _fit_tau(ps, gs, self.eps) for o, (ps, gs) in groups.items()}
+        self.taus = {o: _fit_tau(ps, gs, self.eps) for o, (ps, gs) in groups.items() if len(ps) >= MIN_GROUP}
 
     def decide(self, probs: dict[str, float]) -> GateDecision:
         return _threshold(probs, self.taus.get(_top(probs)[0], self.tau))
@@ -119,7 +120,9 @@ class SplitConformal(_Static):
     def fit(self, probs: list[dict[str, float]], gold: list[str]) -> None:
         self.scores = np.array([1 - p.get(g, 0.0) for p, g in zip(probs, gold)])
         n = len(self.scores)
-        self.q = _quantile(self.scores, math.ceil((n + 1) * (1 - self.eps)) / n)
+        k = math.ceil((n + 1) * (1 - self.eps))
+        # k > n: too few calibration items for 1-eps coverage, so only the full set is valid
+        self.q = _quantile(self.scores, k / n) if 0 < n and k <= n else math.inf
 
     def _q(self) -> float:
         return self.q
