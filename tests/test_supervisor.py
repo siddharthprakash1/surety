@@ -71,16 +71,19 @@ def test_slot_value_prompt_and_strip(httpx_mock):
     _reply(httpx_mock, "  running shoes\n")
     s = _state()
     s.meta["task"] = "find shoes"
-    assert _sup().slot_value(s, "b2") == "running shoes"
+    text, usage = _sup().slot_value(s, "b2")
+    assert text == "running shoes" and usage.latency_ms >= 0
     user = json.loads(httpx_mock.get_request().content)["messages"][1]["content"]
     assert "Give only the text to type into Bravo for task find shoes" in user
 
 
 def test_slot_value_empty_is_none(httpx_mock):
     _reply(httpx_mock, "")
-    assert _sup().slot_value(_state(), "a1") is None
+    assert _sup().slot_value(_state(), "a1")[0] is None
 
 
-def test_mock_supervisor_slots():
+def test_mock_supervisor_slots_and_candidates():
     m = MockSupervisor("a1", slots={"b2": "x"})
-    assert m.slot_value(_state(), "b2") == "x" and m.slot_value(_state(), "a1") is None
+    assert m.slot_value(_state(), "b2")[0] == "x" and m.slot_value(_state(), "a1")[0] is None
+    m.choose(_state(), ["a1"])
+    assert m.candidates == [["a1"]] and m.calls == 3

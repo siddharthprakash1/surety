@@ -12,8 +12,8 @@ from surety.supervise import MockSupervisor, Supervisor
 from surety.trace import Trace
 
 SETUP = """MINIWOB_URL is not set. Serve MiniWoB++ first:
-  git clone https://github.com/Farama-Foundation/miniwob-plusplus && cd miniwob-plusplus/miniwob/html && python -m http.server 8080
-  export MINIWOB_URL=http://localhost:8080/miniwob/"""
+  git clone https://github.com/Farama-Foundation/miniwob-plusplus && cd miniwob-plusplus/miniwob/html && python -m http.server 8765
+  export MINIWOB_URL=http://localhost:8765/miniwob/"""
 POLICIES = {"fixed": FixedThreshold, "conformal": SplitConformal}
 
 

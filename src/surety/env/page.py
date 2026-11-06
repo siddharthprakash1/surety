@@ -8,7 +8,6 @@ class Element:
     role: str
     name: str
     value: str = ""
-    href: str = ""
 
 
 @dataclass

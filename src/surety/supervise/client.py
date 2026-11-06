@@ -54,9 +54,9 @@ class Supervisor:
         text, usage = self._complete(build_choose_prompt(state, candidate_ids))
         return _parse(text, allowed), usage
 
-    def slot_value(self, state: DecisionState, element_id: str) -> str | None:
-        text, _ = self._complete(build_slot_prompt(state, element_id))
-        return text.strip() or None
+    def slot_value(self, state: DecisionState, element_id: str) -> tuple[str | None, Usage]:
+        text, usage = self._complete(build_slot_prompt(state, element_id))
+        return text.strip() or None, usage
 
 
 class MockSupervisor:
@@ -64,10 +64,13 @@ class MockSupervisor:
         self.answer = answer
         self.slots = slots or {}
         self.calls = 0
+        self.candidates: list[list[str] | None] = []
 
     def choose(self, state: DecisionState, candidate_ids: list[str] | None = None) -> tuple[str | None, Usage]:
         self.calls += 1
+        self.candidates.append(candidate_ids)
         return self.answer, Usage(0, 0, 0.0)
 
-    def slot_value(self, state: DecisionState, element_id: str) -> str | None:
-        return self.slots.get(element_id)
+    def slot_value(self, state: DecisionState, element_id: str) -> tuple[str | None, Usage]:
+        self.calls += 1
+        return self.slots.get(element_id), Usage(0, 0, 0.0)

@@ -3,34 +3,45 @@ from surety.env.page import Action, Element, Page
 SELECTOR = ("a, button, input, select, textarea, [role=button], [role=link], [role=textbox], "
             "[role=checkbox], [role=menuitem]")
 MAX_ELEMENTS = 150
-_TEXT_INPUTS = {"", "text", "search", "email", "url", "tel", "number", "password", "date", "time", "datetime-local",
-                "month", "week"}
+TIMEOUT_MS = 5_000
+_TEXT_INPUTS = {"", "text", "email", "url", "tel", "number", "password", "date", "time", "datetime-local", "month",
+                "week"}
+# visible, inside the viewport and enabled, so scrolling changes what is enumerated
 _JS = """els => els.map(el => {
   const r = el.getBoundingClientRect(), s = getComputedStyle(el);
   return {
-    visible: r.width > 0 && r.height > 0 && s.visibility !== 'hidden' && s.display !== 'none',
+    visible: r.width > 0 && r.height > 0 && r.bottom > 0 && r.top < innerHeight && !el.disabled
+      && s.visibility !== 'hidden' && s.display !== 'none',
     tag: el.tagName.toLowerCase(), role: el.getAttribute('role') || '', type: (el.getAttribute('type') || '').toLowerCase(),
     aria: el.getAttribute('aria-label') || '', text: el.innerText || '', placeholder: el.getAttribute('placeholder') || '',
     name: el.getAttribute('name') || '', value: el.value == null ? '' : String(el.value),
-    href: typeof el.href === 'string' ? el.href : '',
+    checked: typeof el.checked === 'boolean' ? String(el.checked) : (el.getAttribute('aria-checked') || ''),
   };
 })"""
 
 
 def _role(d: dict) -> str:
-    if d["role"]:
-        return d["role"]
-    # an <input type=checkbox|submit|...> is clicked, not typed into
-    if d["tag"] == "input" and d["type"] not in _TEXT_INPUTS:
-        return d["type"]
-    return d["tag"]
+    tag = d["tag"]
+    # native form controls: the tag decides, since role=combobox is often a plain text input
+    if tag == "input":
+        if d["type"] == "search" or d["role"] == "searchbox":
+            return "searchbox"
+        return "input" if d["type"] in _TEXT_INPUTS else d["type"]
+    if tag in {"textarea", "select"}:
+        return tag
+    return d["role"] or ("link" if tag == "a" else tag)
 
 
 def _element(i: int, d: dict) -> Element:
+    role = _role(d)
+    if role in {"checkbox", "radio"}:
+        value = d["checked"]
+    elif d["type"] == "password" or d["tag"] not in {"input", "textarea", "select"}:
+        value = ""
+    else:
+        value = d["value"]
     text = " ".join(d["text"].split())[:80]
-    value = "" if d["type"] == "password" or d["tag"] not in {"input", "textarea", "select"} else d["value"]
-    return Element(f"e{i}", _role(d), d["aria"] or text or d["placeholder"] or d["name"], value,
-                   d["href"] if d["tag"] == "a" else "")
+    return Element(f"e{i}", role, d["aria"] or text or d["placeholder"] or d["name"], value)
 
 
 class PlaywrightEnv:
@@ -43,6 +54,7 @@ class PlaywrightEnv:
         self.page = self._browser.new_page()
         self.page.goto(url)
         self._handles: dict = {}
+        self._roles: dict[str, str] = {}
 
     def observe(self) -> Page:
         loc = self.page.locator(SELECTOR)
@@ -55,18 +67,20 @@ class PlaywrightEnv:
             e = _element(len(elements) + 1, d)
             elements.append(e)
             self._handles[e.id] = loc.nth(i)
+        self._roles = {e.id: e.role for e in elements}
         return Page(self.page.url, self.page.title(), self.page.inner_text("body")[:4000], elements)
 
     def act(self, action: Action) -> None:
         h = self._handles[action.element_id] if action.element_id else None
         match action.kind:
             case "click":
-                h.click()
+                h.click(timeout=TIMEOUT_MS)
             case "type":
-                h.fill(action.text or "")
-                h.press("Enter")
+                h.fill(action.text or "", timeout=TIMEOUT_MS)
+                if self._roles.get(action.element_id) == "searchbox":
+                    h.press("Enter", timeout=TIMEOUT_MS)
             case "select":
-                h.select_option(action.text)
+                h.select_option(action.text, timeout=TIMEOUT_MS)
             case "scroll":
                 self.page.mouse.wheel(0, 600)
             case "back":

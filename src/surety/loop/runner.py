@@ -1,15 +1,17 @@
 from dataclasses import asdict, dataclass
 from functools import partial
+from urllib.parse import urlsplit
 
 from surety.compile import NONE_OF_THESE, compile_page
 from surety.decide import Backend
 from surety.env import Action, Env
-from surety.gate import GatePolicy
+from surety.gate import CriticalDetector, GatePolicy
 from surety.trace import Trace
 from surety.types import DecisionState
 
-TYPE_ROLES = {"input", "textbox", "textarea", "searchbox"}
+TYPE_ROLES = {"input", "textbox", "textarea", "searchbox", "spinbutton"}
 SELECT_ROLES = {"select", "combobox"}
+_DETECTOR = CriticalDetector()
 
 
 @dataclass
@@ -21,31 +23,28 @@ class Episode:
     executor_calls: int
 
 
-def _action(option_id: str | None, roles: dict[str, str], state: DecisionState, supervisor) -> Action | None:
+def _call(fn, state: DecisionState, ep: Episode, row: dict, arg):
+    value, usage = fn(state, arg)
+    ep.supervisor_calls += 1
+    row["supervisor"].append({"call": fn.__name__, **asdict(usage)})
+    return value
+
+
+def _plan(option_id: str | None, roles: dict[str, str]) -> tuple[str, str] | None:
     if option_id in (NONE_OF_THESE, None):
         return None
     role = roles.get(option_id)
-    if role in TYPE_ROLES:
-        return Action("type", option_id, supervisor.slot_value(state, option_id))
-    if role in SELECT_ROLES:
-        return Action("select", option_id, supervisor.slot_value(state, option_id))
-    return Action("click", option_id)
+    return ("type" if role in TYPE_ROLES else "select" if role in SELECT_ROLES else "click"), option_id
 
 
-def _ask(supervisor, state: DecisionState, ep: Episode, row: dict, candidates: list[str] | None) -> str | None:
-    choice, usage = supervisor.choose(state, candidates)
-    ep.supervisor_calls += 1
-    row["supervisor"].append(asdict(usage))
-    return choice
-
-
-def _key(a: Action) -> tuple:
-    return a.kind, a.element_id, a.text
+def _bare(url: str) -> str:
+    return urlsplit(url)._replace(query="", fragment="").geturl()
 
 
 def run(task: str, env: Env, backend: Backend, policy: GatePolicy, supervisor, trace: Trace | None = None,
         max_steps: int = 30, n_perm: int = 1) -> Episode:
     ep = Episode(task, [], "max_steps", 0, 0)
+    detector = getattr(policy, "detector", None) or _DETECTOR
     history: list[str] = []
     last, streak, nones = None, 0, 0
     for i in range(max_steps):
@@ -58,45 +57,62 @@ def run(task: str, env: Env, backend: Backend, policy: GatePolicy, supervisor, t
         answer = backend.choice(state, n_perm)
         ep.executor_calls += 1
         d = policy.decide(answer.probs)
-        row = {"step": i, "url": page.url, "n_options": len(state.options), "probs": answer.probs,
+        row = {"step": i, "url": _bare(page.url), "n_options": len(state.options), "probs": answer.probs,
                "decision": d.action, "reason": d.reason, "candidate_set": d.candidate_set,
                "executor_ms": answer.latency_ms, "supervisor": []}
-        ask = partial(_ask, supervisor, state, ep, row)
+        ask = partial(_call, supervisor.choose, state, ep, row)
+        slot = partial(_call, supervisor.slot_value, state, ep, row)
 
-        stop, chosen, action = None, None, None
+        stop, action = None, None
+        chosen, by_sup = d.option_id, False
         if d.reason.startswith("stop:"):
             stop = d.reason
         else:
-            chosen = d.option_id
             if d.action == "escalate":
-                chosen = ask(d.candidate_set or None)
-                if chosen in (NONE_OF_THESE, None):
+                cands = d.candidate_set or None
+                chosen, by_sup = ask(cands), True
+                if chosen in (NONE_OF_THESE, None) and cands and set(cands) < set(labels):
                     chosen = ask(None)
-            action = _action(chosen, roles, state, supervisor)
-            same = streak if action and _key(action) == last else 0
+            plan = _plan(chosen, roles)
+            same = streak if plan and plan == last else 0
             if same >= 3:
-                stop, action = "stuck", None
+                stop = "stuck"
             elif same == 2:
-                chosen = ask(None)
-                action = _action(chosen, roles, state, supervisor)
-            if not stop and action is None:
-                nones = nones + 1 if chosen == NONE_OF_THESE else 0
-                stop = "done" if nones == 2 else None
-                action = Action("done" if stop else "scroll")
-            elif action:
-                nones = 0
+                chosen, by_sup = ask(None), True
+                plan = _plan(chosen, roles)
+            if plan and by_sup and not stop and (cat := detector.classify(labels.get(chosen, chosen))):
+                row["critical"] = "stop:payment" if cat == "payment" else f"critical:{cat}"
+                if cat == "payment":
+                    stop = row["critical"]
+            if not stop:
+                text = slot(plan[1]) if plan and plan[0] != "click" else None
+                if plan and (plan[0] == "click" or text):
+                    action = Action(plan[0], plan[1], text)
+                    nones = 0
+                else:
+                    # a missing slot value counts as none_of_these; an unanswered escalation does not
+                    nones = nones + 1 if chosen == NONE_OF_THESE or plan else 0
+                    stop = "done" if nones == 2 else None
+                    action = Action("done" if stop else "scroll")
 
         if action:
-            env.act(action)
-            streak = streak + 1 if _key(action) == last else 1
-            last = _key(action)
-            history.append(f"{action.kind} {labels.get(action.element_id, '')}".strip()
-                           + (f" {action.text!r}" if action.text else ""))
+            try:
+                env.act(action)
+            except Exception as e:
+                # only the type: env messages can echo typed text
+                row["error"] = type(e).__name__
+                stop = "error"
+            else:
+                streak = streak + 1 if (action.kind, action.element_id) == last else 1
+                last = action.kind, action.element_id
+                history.append(f"{action.kind} {labels.get(action.element_id, '')}".strip()
+                               + (f" {action.text!r}" if action.text else ""))
         row.update(chosen=chosen, kind=action.kind if action else None)
         ep.steps.append(row)
         if trace:
             trace.record(row)
-        if stop or getattr(env, "terminated", False):
-            ep.stop_reason = stop or "terminated"
+        stop = stop or next((f for f in ("terminated", "truncated") if getattr(env, f, False)), None)
+        if stop:
+            ep.stop_reason = stop
             break
     return ep
