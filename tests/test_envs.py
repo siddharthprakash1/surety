@@ -10,8 +10,8 @@ def _dom(**kw):
     return {**d, **kw}
 
 
-def test_playwright_element_redacts_password():
-    assert _element(1, _dom(type="password", name="pw", value="hunter2")) == Element("e1", "input", "pw")
+def test_playwright_password_role_and_redacted_value():
+    assert _element(1, _dom(type="password", name="pw", value="hunter2")) == Element("e1", "password", "pw")
 
 
 @pytest.mark.parametrize("dom,role", [
@@ -55,6 +55,7 @@ def _obs(error=""):
             _node("button", "19", "Off", {"disabled": True}),
             _node("button", "20", "Below"),
             _node("spinbutton", "21", "Qty"),
+            _node("textbox", "22", "Secret", {"type": "password"}, value={"value": "hunter2"}),
         ]},
         "extra_element_properties": {"20": {"visibility": 0.0}, "12": {"visibility": 1.0}},
         "url": "http://m/", "open_pages_titles": ["T"], "active_page_index": np.array([0]),
@@ -89,6 +90,7 @@ def test_browsergym_observe_converts_axtree():
         Element("bid:12", "button", "OK"), Element("bid:13", "checkbox", "A", "true"),
         Element("bid:16", "textbox", "Search"), Element("bid:17", "combobox", "Size"),
         Element("bid:18", "searchbox", "Find"), Element("bid:21", "spinbutton", "Qty"),
+        Element("bid:22", "password", "Secret"),
     ]
 
 

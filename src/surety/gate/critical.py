@@ -31,6 +31,18 @@ _STEMS = {
         r"deactivat\w*",
         r"close[\s-]+(?:your[\s-]+)?account",
     ],
+    "credentials": [
+        r"password",
+        r"passcode",
+        r"card[\s-]+number",
+        r"cvv\b",
+        r"cvc\b",
+        r"social[\s-]+security",
+        r"ssn\b",
+        r"one[\s-]time[\s-]+(?:code|password)",
+        r"otp\b",
+        r"expiry",
+    ],
 }
 _RULES = {cat: re.compile(rf"\b(?:{'|'.join(stems)})", re.IGNORECASE) for cat, stems in _STEMS.items()}
 
@@ -60,12 +72,12 @@ class CriticalOverride:
     def decide(self, probs: dict[str, float]) -> GateDecision:
         d = self.policy.decide(probs)
         labels, self.labels = self.labels, {}
-        top = max(probs, key=probs.get)
+        if d.action != "act":
+            return d
         # unlabelled ids are classified by the id itself: recall over precision
-        cat = self.detector.classify(labels.get(top, top))
+        cat = self.detector.classify(labels.get(d.option_id, d.option_id))
         if cat == "payment":
-            candidates = d.candidate_set if d.action == "escalate" else [top]
-            return GateDecision("escalate", None, candidates, "stop:payment")
-        if cat and d.action == "act":
+            return GateDecision("escalate", None, [d.option_id], "stop:payment")
+        if cat:
             return GateDecision("escalate", None, [d.option_id], f"critical:{cat}")
         return d

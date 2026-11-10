@@ -5,7 +5,7 @@ import numpy as np
 from surety.env.page import Action, Element, Page
 
 ROLES = {"link", "button", "textbox", "checkbox", "combobox", "menuitem", "option", "radio", "tab", "searchbox",
-         "listbox", "spinbutton", "switch", "menuitemcheckbox", "menuitemradio", "slider", "treeitem"}
+         "listbox", "spinbutton", "switch", "menuitemcheckbox", "menuitemradio", "slider", "treeitem", "password"}
 MIN_VISIBILITY = 0.5
 
 
@@ -15,6 +15,10 @@ def _v(node: dict, key: str) -> str:
 
 def _props(node: dict) -> dict:
     return {p["name"]: (p.get("value") or {}).get("value") for p in node.get("properties", [])}
+
+
+def _is_password(role: str, props: dict) -> bool:
+    return "password" in role.lower() or str(props.get("type") or "").lower() == "password"
 
 
 class BrowserGymEnv:
@@ -41,14 +45,16 @@ class BrowserGymEnv:
             role, name, bid = _v(node, "role"), _v(node, "name"), node.get("browsergym_id")
             if role == "StaticText" and name:
                 text.append(name)
+            props = _props(node)
+            if _is_password(role, props):
+                role = "password"
             if node.get("ignored") or bid is None or role not in ROLES:
                 continue
-            props = _props(node)
             if props.get("disabled") or extra.get(bid, {}).get("visibility", 1.0) < MIN_VISIBILITY:
                 continue
             if role == "combobox" and props.get("editable"):
                 role = "textbox"
-            value = str(props["checked"]) if "checked" in props else _v(node, "value")
+            value = "" if role == "password" else str(props["checked"]) if "checked" in props else _v(node, "value")
             elements.append(Element(f"bid:{bid}", role, name, value))
         self._roles = {e.id: e.role for e in elements}
         titles = self.obs.get("open_pages_titles") or [""]

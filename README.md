@@ -4,7 +4,7 @@ Surety is a web computer-use agent harness. A small local decision model picks e
 
 ## Design
 
-Per step, the executor (Kev-4B, served locally) scores the options in several shuffled orders (debias), the averaged probabilities are temperature-scaled on calibration data (recalibrate), and a gate either acts on one option or escalates to the supervisor (any OpenAI-compatible chat model) with a candidate set. Gate families on identical code: fixed, margin, fitted and per-choice probability thresholds; split-conformal LAC sets (coverage control); conformal risk control on the autonomous-error loss 1{|C|=1 ∧ gold∉C}; adaptive versions of the last two that update α online from escalated steps plus a random audit of acted steps (weight 1/r). A critical-action override (pay, send, delete, account changes) wraps every policy. Spec: `docs/superpowers/specs/2026-11-06-surety-design.md`.
+Per step, the executor (Kev-4B, served locally) scores the options in several shuffled orders (debias), the averaged probabilities are temperature-scaled on calibration data (recalibrate), and a gate either acts on one option or escalates to the supervisor (any OpenAI-compatible chat model) with a candidate set. Gate families on identical code: fixed, margin, fitted and per-choice probability thresholds; split-conformal LAC sets (coverage control); conformal risk control on the autonomous-error loss 1{|C|=1 ∧ gold∉C}; adaptive versions of the last two that update α online from escalated steps plus a random audit of acted steps (weight 1/r). A critical-action override (pay, send, delete, account changes) wraps every policy; typing into password or other credential fields stops the episode. Spec: `docs/superpowers/specs/2026-11-06-surety-design.md`.
 
 ## Results (M1)
 

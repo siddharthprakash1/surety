@@ -5,11 +5,11 @@ from urllib.parse import urlsplit
 from surety.compile import NONE_OF_THESE, compile_page
 from surety.decide import Backend
 from surety.env import Action, Env
-from surety.gate import CriticalDetector, GatePolicy
+from surety.gate import CriticalDetector, CriticalOverride, GatePolicy
 from surety.trace import Trace
 from surety.types import DecisionState
 
-TYPE_ROLES = {"input", "textbox", "textarea", "searchbox", "spinbutton"}
+TYPE_ROLES = {"input", "textbox", "textarea", "searchbox", "spinbutton", "password"}
 SELECT_ROLES = {"select", "combobox"}
 _DETECTOR = CriticalDetector()
 
@@ -38,13 +38,16 @@ def _plan(option_id: str | None, roles: dict[str, str]) -> tuple[str, str] | Non
 
 
 def _bare(url: str) -> str:
-    return urlsplit(url)._replace(query="", fragment="").geturl()
+    u = urlsplit(url)
+    return u._replace(netloc=u.netloc.rpartition("@")[2], query="", fragment="").geturl()
 
 
 def run(task: str, env: Env, backend: Backend, policy: GatePolicy, supervisor, trace: Trace | None = None,
         max_steps: int = 30, n_perm: int = 1) -> Episode:
     ep = Episode(task, [], "max_steps", 0, 0)
-    detector = getattr(policy, "detector", None) or _DETECTOR
+    if not isinstance(policy, CriticalOverride):
+        policy = CriticalOverride(policy, _DETECTOR)
+    detector = policy.detector
     history: list[str] = []
     last, streak, nones = None, 0, 0
     for i in range(max_steps):
@@ -52,8 +55,7 @@ def run(task: str, env: Env, backend: Backend, policy: GatePolicy, supervisor, t
         state = compile_page(page, task, history)
         labels = {o.id: o.label for o in state.options}
         roles = {e.id: e.role for e in page.elements}
-        if hasattr(policy, "set_labels"):
-            policy.set_labels(labels)
+        policy.set_labels(labels)
         answer = backend.choice(state, n_perm)
         ep.executor_calls += 1
         d = policy.decide(answer.probs)
@@ -64,13 +66,13 @@ def run(task: str, env: Env, backend: Backend, policy: GatePolicy, supervisor, t
         slot = partial(_call, supervisor.slot_value, state, ep, row)
 
         stop, action = None, None
-        chosen, by_sup = d.option_id, False
+        chosen = d.option_id
         if d.reason.startswith("stop:"):
             stop = d.reason
         else:
             if d.action == "escalate":
                 cands = d.candidate_set or None
-                chosen, by_sup = ask(cands), True
+                chosen = ask(cands)
                 if chosen in (NONE_OF_THESE, None) and cands and set(cands) < set(labels):
                     chosen = ask(None)
             plan = _plan(chosen, roles)
@@ -78,12 +80,15 @@ def run(task: str, env: Env, backend: Backend, policy: GatePolicy, supervisor, t
             if same >= 3:
                 stop = "stuck"
             elif same == 2:
-                chosen, by_sup = ask(None), True
+                chosen = ask(None)
                 plan = _plan(chosen, roles)
-            if plan and by_sup and not stop and (cat := detector.classify(labels.get(chosen, chosen))):
-                row["critical"] = "stop:payment" if cat == "payment" else f"critical:{cat}"
-                if cat == "payment":
-                    stop = row["critical"]
+            if plan and not stop:
+                cat = detector.classify(labels.get(chosen, chosen))
+                typed = plan[0] != "click" and (cat == "credentials" or roles.get(chosen) == "password")
+                if cat == "payment" or typed:
+                    stop = row["critical"] = "stop:payment" if cat == "payment" else "stop:credentials"
+                elif cat:
+                    row["critical"] = f"critical:{cat}"
             if not stop:
                 text = slot(plan[1]) if plan and plan[0] != "click" else None
                 if plan and (plan[0] == "click" or text):

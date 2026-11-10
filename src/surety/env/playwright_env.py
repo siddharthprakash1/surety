@@ -4,8 +4,7 @@ SELECTOR = ("a, button, input, select, textarea, [role=button], [role=link], [ro
             "[role=checkbox], [role=menuitem]")
 MAX_ELEMENTS = 150
 TIMEOUT_MS = 5_000
-_TEXT_INPUTS = {"", "text", "email", "url", "tel", "number", "password", "date", "time", "datetime-local", "month",
-                "week"}
+_TEXT_INPUTS = {"", "text", "email", "url", "tel", "number", "date", "time", "datetime-local", "month", "week"}
 # visible, inside the viewport and enabled, so scrolling changes what is enumerated
 _JS = """els => els.map(el => {
   const r = el.getBoundingClientRect(), s = getComputedStyle(el);
@@ -24,6 +23,8 @@ def _role(d: dict) -> str:
     tag = d["tag"]
     # native form controls: the tag decides, since role=combobox is often a plain text input
     if tag == "input":
+        if d["type"] == "password":
+            return "password"
         if d["type"] == "search" or d["role"] == "searchbox":
             return "searchbox"
         return "input" if d["type"] in _TEXT_INPUTS else d["type"]
@@ -36,7 +37,7 @@ def _element(i: int, d: dict) -> Element:
     role = _role(d)
     if role in {"checkbox", "radio"}:
         value = d["checked"]
-    elif d["type"] == "password" or d["tag"] not in {"input", "textarea", "select"}:
+    elif role == "password" or d["tag"] not in {"input", "textarea", "select"}:
         value = ""
     else:
         value = d["value"]

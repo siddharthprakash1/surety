@@ -6,6 +6,7 @@ from surety.decide import MockBackend
 from surety.env import Action, Element, Page
 from surety.gate import CriticalDetector, CriticalOverride, FixedThreshold
 from surety.loop import run
+from surety.loop.runner import _bare
 from surety.supervise import MockSupervisor
 from surety.trace import Trace
 from surety.types import GateDecision
@@ -111,10 +112,27 @@ def test_supervisor_chosen_payment_stops_without_acting():
     assert ep.stop_reason == "stop:payment" and env.actions == [] and ep.supervisor_calls == 1
 
 
-def test_supervisor_chosen_critical_acts_and_is_recorded():
-    env = FakeEnv([_page(BUTTON, Element("e2", "button", "Send"))])
+def test_unwrapped_policy_stops_on_executor_payment():
+    env = FakeEnv([_page(Element("e1", "button", "Place order"))])
+    ep = run("buy", env, always("e1"), FixedThreshold(0.5), MockSupervisor("e1"))
+    assert ep.stop_reason == "stop:payment" and env.actions == [] and len(ep.steps) == 1
+
+
+@pytest.mark.parametrize("label,critical", [("Send", "critical:send"), ("Forgot password?", "critical:credentials")])
+def test_supervisor_chosen_critical_click_acts_and_is_recorded(label, critical):
+    env = FakeEnv([_page(BUTTON, Element("e2", "button", label))])
     ep = run("mail", env, MockBackend(uniform), FixedThreshold(0.5), MockSupervisor("e2"), max_steps=1)
-    assert env.actions == [Action("click", "e2")] and ep.steps[0]["critical"] == "critical:send"
+    assert env.actions == [Action("click", "e2")] and ep.steps[0]["critical"] == critical
+
+
+@pytest.mark.parametrize("executor", ["confident", "uniform"])
+@pytest.mark.parametrize("el", [Element("e2", "password", "pw"), Element("e2", "input", "Card number")])
+def test_credential_entry_stops_without_typing(executor, el):
+    env = FakeEnv([_page(BUTTON, el)])
+    sup = MockSupervisor("e2", slots={"e2": "hunter2"})
+    ep = run("login", env, always("e2") if executor == "confident" else MockBackend(uniform), FixedThreshold(0.5), sup)
+    assert ep.stop_reason == "stop:credentials" and env.actions == [] and len(ep.steps) == 1
+    assert ep.steps[0]["critical"] == "stop:credentials" and sup.calls == 1
 
 
 def test_typing_uses_slot_value():
@@ -139,6 +157,10 @@ def test_typed_text_never_in_trace(tmp_path):
     trace.close()
     text = (tmp_path / "t.jsonl").read_text()
     assert "hunter2" not in text and '"url": "http://x.test/s"' in text
+
+
+def test_traced_url_drops_userinfo():
+    assert _bare("https://u:hunter2@x.test:8080/s?q=1#f") == "https://x.test:8080/s"
 
 
 def test_supervisor_gets_exact_candidate_subset():
