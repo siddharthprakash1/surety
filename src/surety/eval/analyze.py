@@ -81,6 +81,11 @@ def h1_table(rows, vs=None) -> str:
     return _table(("split", "variant", "n", "acc", "ECE", "Brier", "conf_err"), body)
 
 
+def _auto_err_ci(sets, gold) -> str:
+    lo, hi = m.wilson(sum(len(s) == 1 and s[0] != g for s, g in zip(sets, gold)), len(gold))
+    return f"[{lo:.3f}, {hi:.3f}]"
+
+
 def _sets(policy, probs):
     if isinstance(policy, SplitConformal):
         return [policy.prediction_set(p) for p in probs]
@@ -101,8 +106,10 @@ def h2_table(rows, eps_list=(0.05, 0.1), vs=None) -> str:
                 p, g = _split(rows, probs, split)
                 sets = _sets(policy, p)
                 body.append([str(eps), policy.name, split, len(g), m.autonomous_error_rate(sets, g),
-                             m.automation_rate(sets), m.coverage(sets, g), m.mean_set_size(sets)])
-    return _table(("eps", "policy", "split", "n", "auto_err", "automation", "coverage", "set_size"), body)
+                             _auto_err_ci(sets, g), m.automation_rate(sets), m.coverage(sets, g),
+                             m.mean_set_size(sets)])
+    return _table(("eps", "policy", "split", "n", "auto_err", "auto_err_95ci", "automation", "coverage", "set_size"),
+                  body)
 
 
 def _stream(policy, probs, gold, r, seed):
@@ -122,7 +129,7 @@ def _stream(policy, probs, gold, r, seed):
 
 
 def _aci_row(policy, rate, sets, gold, alpha):
-    return [policy.name, rate, len(gold), m.autonomous_error_rate(sets, gold),
+    return [policy.name, rate, len(gold), m.autonomous_error_rate(sets, gold), _auto_err_ci(sets, gold),
             m.autonomous_error_rate(sets[-TAIL:], gold[-TAIL:]), m.automation_rate(sets), alpha]
 
 
@@ -145,7 +152,8 @@ def aci_simulation(rows, eps, audit_rates=(0.0, 0.05, 0.2), gamma=0.02, seed=0, 
             policy = adaptive_cls(eps, gamma)
             policy.fit(*cal)
             body.append(_aci_row(policy, f"{r:g}", _stream(policy, p, g, r, seed), g, policy.alpha))
-    return _table(("policy", "audit_rate", "n", "auto_err", "tail_auto_err", "automation", "final_alpha"), body)
+    return _table(("policy", "audit_rate", "n", "auto_err", "auto_err_95ci", "tail_auto_err", "automation",
+                   "final_alpha"), body)
 
 
 def ablation_table(rows_compact, rows_full) -> str:
@@ -203,6 +211,11 @@ def select_escalated(rows, policy, splits, n, seed, probs=None) -> list[tuple[di
 
 
 def h3_table(rows) -> str:
+    first: dict[tuple, dict] = {}
+    for r in rows:
+        first.setdefault((r["id"], r["cond"]), r)
+    paired = {i for i, c in first if c == "full"} & {i for i, c in first if c == "set"}
+    rows = [r for (i, _), r in first.items() if i in paired]
     body = []
     for cond in ("full", "set"):
         rs = [r for r in rows if r["cond"] == cond]
@@ -219,10 +232,10 @@ def h3_table(rows) -> str:
                      rate(lambda r: r.get("fallback_parsed", False)),
                      float(np.mean([r["correct"] for r in ans])) if ans else float("nan"),
                      float(np.mean([r["correct"] for r in ins])) if ins else float("nan"),
-                     mean("prompt_tokens"), mean("completion_tokens"), mean("latency_ms")])
+                     round(mean("prompt_tokens")), round(mean("completion_tokens")), round(mean("latency_ms"))])
     table = _table(("cond", "n", "acc", "abstain", "unparsed", "fallback", "acc_given_answer", "acc_gold_in_set", "prompt_tok", "completion_tok", "latency_ms"), body)
-    sets = [r for r in rows if r["cond"] == "set"] or rows
+    sets = [r for r in rows if r["cond"] == "set"]
     types = sorted({r["task_type"] for r in sets})
     per = ", ".join(f"{t} n={sum(r['task_type'] == t for r in sets)}" for t in types)
-    return (table + f"\ngold_in_set (LAC coverage on escalated rows): "
-            f"{float(np.mean([r['gold_in_set'] for r in sets])):.3f}; {per}\n")
+    cov = float(np.mean([r["gold_in_set"] for r in sets])) if sets else float("nan")
+    return table + f"\ngold_in_set (LAC coverage on the H3 sample): {cov:.3f}; paired n={len(paired)}; {per}\n"

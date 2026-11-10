@@ -25,19 +25,21 @@ def _cols(out):
     return {r[0]: dict(zip(head, r)) for r in ([c.strip() for c in ln.strip("|").split("|")] for ln in lines[2:4])}
 
 
-def test_h3_table_two_conditions():
-    rows = [_res("full", True), _res("full", False, tt="element_grounding"),
-            _res("set", True), _res("set", False, in_set=False, chosen=None, abstained=True),
-            _res("set", False, in_set=False, chosen=None, abstained=False),
-            _res("set", True, fallback_parsed=True)]
+def test_h3_table_paired_conditions():
+    rows = [_res("full", True, id="a"), _res("full", False, tt="element_grounding", id="b"),
+            _res("full", True, id="c"), _res("full", True, id="d"), _res("full", False, id="only_full"),
+            _res("set", True, id="a"), _res("set", False, in_set=False, chosen=None, abstained=True, id="b"),
+            _res("set", False, in_set=False, chosen=None, abstained=False, id="c"),
+            _res("set", True, fallback_parsed=True, id="d"), _res("set", False, id="d"),
+            _res("set", True, id="only_set")]
     out = h3_table(rows)
     t = _cols(out)
-    assert t["full"]["n"] == "2" and t["full"]["acc"] == "0.500" and t["full"]["abstain"] == "0.000"
+    assert t["full"]["n"] == "4" and t["full"]["acc"] == "0.750" and t["full"]["abstain"] == "0.000"
     assert t["set"]["n"] == "4" and t["set"]["acc"] == "0.500"
     assert t["set"]["abstain"] == "0.250" and t["set"]["unparsed"] == "0.250" and t["set"]["fallback"] == "0.250"
     assert t["set"]["acc_given_answer"] == "1.000" and t["set"]["acc_gold_in_set"] == "1.000"
-    assert t["full"]["prompt_tok"] == "1000.000" and t["set"]["prompt_tok"] == "400.000"
-    assert "0.500; action_prediction n=4" in out
+    assert t["full"]["prompt_tok"] == "1000" and t["set"]["prompt_tok"] == "400"
+    assert "H3 sample): 0.500; paired n=4; action_prediction n=4" in out
 
 
 def test_h3_table_legacy_null_counts_as_abstain():

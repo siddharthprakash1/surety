@@ -109,6 +109,13 @@ def test_h2_pinned_rows(shifted):
         assert got == pytest.approx(pin, abs=1e-3)
 
 
+def test_auto_err_ci_brackets_rate(shifted):
+    recs = records(h2_table(shifted, eps_list=(0.1,))) + records(aci_simulation(shifted, 0.1))
+    for r in recs:
+        lo, hi = (float(x) for x in r["auto_err_95ci"].strip("[]").split(","))
+        assert lo <= float(r["auto_err"]) <= hi and hi - lo > 0
+
+
 def test_h2_threshold_sets_are_singleton_or_full(shifted):
     recs = [r for r in records(h2_table(shifted, eps_list=(0.1,)))
             if r["policy"].split("@")[0] in ("fixed", "margin", "fitted", "per_choice")]

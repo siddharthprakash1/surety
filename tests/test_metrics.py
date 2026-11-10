@@ -52,3 +52,9 @@ def test_risk_coverage_monotone_acted():
     assert rc[1]["risk"] == pytest.approx(0.5)
     assert rc[1]["error_rate_all"] == pytest.approx(1 / 3)
     assert rc[3] == {"tau": 0.95, "acted": 0.0, "risk": 0.0, "error_rate_all": 0.0}
+
+
+def test_wilson_interval():
+    assert m.wilson(10, 100) == pytest.approx((0.0552, 0.1744), abs=1e-4)
+    lo, hi = m.wilson(0, 600)
+    assert lo == 0.0 and hi == pytest.approx(0.00636, abs=1e-5)

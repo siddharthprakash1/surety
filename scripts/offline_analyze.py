@@ -33,7 +33,7 @@ def main() -> None:
     risk_coverage_plot(rows, png, vs=vs)
     parts = [
         f"# M1 analysis: {args.collect.stem}",
-        f"- collection: `{args.collect}`\n"
+        f"- collection: `{Path(args.collect.parent.name) / args.collect.name}`\n"
         f"- rows: {', '.join(f'{s} {counts[s]}' for s in SPLITS)}\n"
         f"- backend: {', '.join(sorted({r['backend'] for r in rows}))}\n"
         f"- mode: {', '.join(sorted({r['mode'] for r in rows}))}",

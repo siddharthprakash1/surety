@@ -48,6 +48,15 @@ def autonomous_error_rate(sets, gold) -> float:
     return float(np.mean([len(s) == 1 and s[0] != g for s, g in zip(sets, gold)]))
 
 
+def wilson(k: int, n: int, z: float = 1.96) -> tuple[float, float]:
+    if not n:
+        return 0.0, 1.0
+    p, d = k / n, 1 + z * z / n
+    c = (p + z * z / (2 * n)) / d
+    h = z * np.sqrt(p * (1 - p) / n + z * z / (4 * n * n)) / d
+    return float(max(c - h, 0.0)), float(min(c + h, 1.0))
+
+
 def risk_coverage_curve(probs, gold, thresholds) -> list[dict]:
     conf, wrong = _top(probs, gold)
     out = []
