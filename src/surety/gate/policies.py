@@ -54,6 +54,10 @@ def _conformal_q(scores: np.ndarray, eps: float) -> float:
     return float(np.sort(scores)[max(k, 1) - 1]) if 0 < n and k <= n else math.inf
 
 
+def _lac_set(probs: dict[str, float], q: float) -> list[str]:
+    return sorted((o for o, p in probs.items() if 1 - p <= q), key=probs.get, reverse=True)
+
+
 class _Static:
     def fit(self, probs: list[dict[str, float]], gold: list[str]) -> None:
         pass
@@ -128,8 +132,7 @@ class SplitConformal(_Static):
         return self.q
 
     def prediction_set(self, probs: dict[str, float]) -> list[str]:
-        q = self._q()
-        return sorted((o for o, p in probs.items() if 1 - p <= q), key=probs.get, reverse=True)
+        return _lac_set(probs, self._q())
 
     def decide(self, probs: dict[str, float]) -> GateDecision:
         c = self.prediction_set(probs)
@@ -139,7 +142,7 @@ class SplitConformal(_Static):
 
 
 class _OnlineAlpha:
-    # alpha_raw is unclipped so a weighted correction past alpha_min/alpha_max is not lost
+    # unclipped below so a weighted correction past alpha_min is not lost; capped above so easy steps bank no credit
     eps: float
     gamma: float
     alpha_min: float
@@ -151,7 +154,7 @@ class _OnlineAlpha:
         return min(max(self.alpha_raw, self.alpha_min), self.alpha_max)
 
     def _aci_step(self, loss: float, weight: float) -> None:
-        self.alpha_raw += self.gamma * (self.eps - weight * loss)
+        self.alpha_raw = min(self.alpha_raw + self.gamma * (self.eps - weight * loss), self.alpha_max)
 
 
 class AdaptiveConformal(_OnlineAlpha, SplitConformal):
@@ -187,8 +190,10 @@ class RiskConformal(SplitConformal):
         super().__init__(eps)
         self.name = f"risk@{eps}"
         self.grid = self.bound = self.auto = np.array([])
+        self.lac_q = math.inf
 
     def fit(self, probs: list[dict[str, float]], gold: list[str]) -> None:
+        self.lac_q = _conformal_q(np.array([1 - p.get(g, 0.0) for p, g in zip(probs, gold)]), self.eps)
         n = len(probs)
         if not n:
             self.grid = self.bound = self.auto = np.array([])
@@ -202,6 +207,13 @@ class RiskConformal(SplitConformal):
         self.bound = n / (n + 1) * (1 - _count_le(release, self.grid) / n) + 1 / (n + 1)
         self.auto = (_count_le(lo, self.grid) - _count_le(hi, self.grid)) / n
         self.q = self._lookup(self.eps)
+
+    def decide(self, probs: dict[str, float]) -> GateDecision:
+        c = self.prediction_set(probs)
+        if len(c) == 1:
+            return _act(c[0], "singleton")
+        lac = _lac_set(probs, self.lac_q)
+        return _escalate(lac, "set" if lac else "empty_set")
 
     def _lookup(self, level: float) -> float:
         # ℓ̃ is pointwise non-increasing in q, so any data-dependent q* ≥ q̂_min keeps E[ℓ̃(q*)] ≤ ε

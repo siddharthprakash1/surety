@@ -240,12 +240,12 @@ def test_adaptive_risk_weight_zero_only_drifts(data):
     assert g.alpha == pytest.approx(0.1 + 0.02 * 0.1)
 
 
-def test_adaptive_risk_alpha_floor_escalates_full_set(data):
+def test_adaptive_risk_alpha_floor_full_crc_set_escalates_with_lac_set(data):
     g = AdaptiveRisk(0.1)
     g.fit(*data[0])
     g.update(SURE, "b", weight=100)
-    assert g.alpha == 0.001
-    assert view(g.decide(SURE)) == ("escalate", None, ["a", "b", "c"])
+    assert g.alpha == 0.001 and g.prediction_set(SURE) == ["a", "b", "c"]
+    assert view(g.decide(SURE)) == ("escalate", None, ["a"])
 
 
 def test_adaptive_risk_q_lookup_matches_risk_conformal_at_eps(data):
@@ -279,3 +279,24 @@ def test_adaptive_alpha_raw_keeps_correction_below_floor(cls):
         raws.append(g.alpha_raw)
         alphas.append(g.alpha)
     assert raws == pytest.approx([-0.049 + 0.001 * k for k in range(1, 11)]) and alphas == [g.alpha_min] * 10
+
+
+@pytest.mark.parametrize("cls", [AdaptiveConformal, AdaptiveRisk])
+def test_adaptive_alpha_raw_capped_after_easy_stream(cls):
+    g = cls(0.1)
+    g.fit(*CAL_TWO)
+    for _ in range(2000):
+        g.update(TWO, "a")
+    assert g.alpha_raw == g.alpha_max
+    g.update(TWO, "b")
+    assert g.alpha == pytest.approx(g.alpha_max - 0.02 * 0.9)
+
+
+def test_risk_conformal_escalates_with_lac_set(data):
+    (cal_p, cal_g), (test_p, _) = data
+    risk, lac = RiskConformal(0.1), SplitConformal(0.1)
+    risk.fit(cal_p, cal_g)
+    lac.fit(cal_p, cal_g)
+    esc = [(p, d) for p in test_p if (d := risk.decide(p)).action == "escalate"]
+    assert esc and all(d.candidate_set == lac.prediction_set(p) for p, d in esc)
+    assert any(d.candidate_set != risk.prediction_set(p) for p, d in esc)
