@@ -1,5 +1,10 @@
+import importlib.util
+from pathlib import Path
+
 from surety.eval.analyze import h3_table, select_escalated
 from surety.gate import SplitConformal
+from surety.supervise import MockSupervisor
+from surety.types import Instance
 
 
 def _row(i, split, tt):
@@ -59,3 +64,15 @@ def test_offline_supervisor_selects_proper_subsets():
     assert count(("test_in", "element_grounding")) == 2
     assert [r["id"] for r, _ in select_escalated(rows, pol, ["test_in", "test_shift"], 6, 0, probs)] == \
         [r["id"] for r, _ in sel]
+
+
+def test_offline_supervisor_lists_set_in_page_order(tmp_path):
+    spec = importlib.util.spec_from_file_location("h3", Path(__file__).parents[1] / "scripts/offline_supervisor.py")
+    script = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(script)
+    inst = Instance("x", "s", "action_prediction", "operation", ["A: a", "B: b", "C: c"], 0, "ctx", "q", 0, "text")
+    row = {"id": "x", "split": "test_in", "task_type": "action_prediction", "option_ids": ["A", "B", "C"],
+           "gold_id": "A"}
+    sup = MockSupervisor("C")
+    script.run([(row, ["C", "A"])], {"x": inst}, sup, tmp_path / "h3.jsonl")
+    assert sup.candidates == [None, ["A", "C"]]

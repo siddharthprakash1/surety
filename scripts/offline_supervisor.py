@@ -22,7 +22,7 @@ def run(pairs, by_id, sup, out: Path, log=sys.stderr) -> None:
     with open(out, "a") as f:
         for k, (r, c) in enumerate(pairs, 1):
             state = compile_instance(by_id[r["id"]], "compact")
-            for cond, ids in (("full", None), ("set", c)):
+            for cond, ids in (("full", None), ("set", [o.id for o in state.options if o.id in c])):
                 if (r["id"], cond) in done:
                     continue
                 try:
