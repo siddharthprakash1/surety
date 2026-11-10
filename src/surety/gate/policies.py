@@ -47,8 +47,11 @@ def _fit_tau(probs: list[dict[str, float]], gold: list[str], eps: float) -> floa
     return math.inf
 
 
-def _quantile(scores: np.ndarray, level: float) -> float:
-    return float(np.quantile(scores, level, method="higher"))
+def _conformal_q(scores: np.ndarray, eps: float) -> float:
+    n = len(scores)
+    k = math.ceil((n + 1) * (1 - eps))
+    # k > n: too few calibration items for 1-eps coverage, so only the full set is valid
+    return float(np.sort(scores)[max(k, 1) - 1]) if 0 < n and k <= n else math.inf
 
 
 class _Static:
@@ -119,10 +122,7 @@ class SplitConformal(_Static):
 
     def fit(self, probs: list[dict[str, float]], gold: list[str]) -> None:
         self.scores = np.array([1 - p.get(g, 0.0) for p, g in zip(probs, gold)])
-        n = len(self.scores)
-        k = math.ceil((n + 1) * (1 - self.eps))
-        # k > n: too few calibration items for 1-eps coverage, so only the full set is valid
-        self.q = _quantile(self.scores, k / n) if 0 < n and k <= n else math.inf
+        self.q = _conformal_q(self.scores, self.eps)
 
     def _q(self) -> float:
         return self.q
@@ -164,9 +164,7 @@ class AdaptiveConformal(_OnlineAlpha, SplitConformal):
         self.alpha_raw = eps
 
     def _q(self) -> float:
-        if self.alpha <= self.alpha_min or not len(self.scores):
-            return math.inf
-        return _quantile(self.scores, 1 - self.alpha)
+        return math.inf if self.alpha <= self.alpha_min else _conformal_q(self.scores, self.alpha)
 
     def update(self, probs: dict[str, float], gold: str, weight: float = 1.0) -> None:
         self._aci_step(float(gold not in self.prediction_set(probs)), weight)

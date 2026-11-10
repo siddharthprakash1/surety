@@ -101,7 +101,7 @@ def test_split_conformal_coverage_on_synthetic(data):
 def test_conformal_quantile_uses_finite_sample_level():
     g = SplitConformal(0.2)
     g.fit(*TENTHS)
-    assert g.q == pytest.approx(0.9)
+    assert g.q == pytest.approx(0.8)
 
 
 @pytest.mark.parametrize("n", [0, 5])
@@ -111,13 +111,13 @@ def test_conformal_too_few_calibration_items_gives_full_set(n):
     assert view(g.decide({"b": 0.01, "a": 0.99})) == ("escalate", None, ["a", "b"])
 
 
-def test_adaptive_quantile_uses_level_one_minus_alpha():
+def test_adaptive_quantile_uses_kth_rule_at_alpha():
     split, aci = SplitConformal(0.2), AdaptiveConformal(0.2)
     split.fit(*TENTHS)
     aci.fit(*TENTHS)
-    probs = {"x": 0.25, "y": 0.15}
-    assert view(aci.decide(probs)) == ("act", "x", ["x"])
-    assert view(split.decide(probs)) == ("escalate", None, ["x", "y"])
+    assert aci._q() == split.q == pytest.approx(0.8)
+    aci.alpha_raw = 0.3
+    assert aci._q() == pytest.approx(0.7)
 
 
 def test_conformal_single_option_acts(data):
