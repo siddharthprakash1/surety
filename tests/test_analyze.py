@@ -3,8 +3,10 @@ import json
 import numpy as np
 import pytest
 
+from surety.calib import metrics as m
 from surety.eval.analyze import (
     SPLITS,
+    ablation_table,
     aci_simulation,
     h1_table,
     h2_table,
@@ -59,7 +61,14 @@ def values(rec, *cols):
 def test_load_collection_reads_jsonl(tmp_path):
     rows = synthetic_rows(3, 0)
     path = tmp_path / "c.jsonl"
-    path.write_text("\n".join(json.dumps(r) for r in rows) + "\n")
+    path.write_text("\n".join(json.dumps(r) for r in rows) + "\n" + json.dumps(rows[0])[:20])
+    assert load_collection(path) == rows
+
+
+def test_load_collection_keeps_unterminated_complete_line(tmp_path):
+    rows = synthetic_rows(3, 0)
+    path = tmp_path / "c.jsonl"
+    path.write_text("\n".join(json.dumps(r) for r in rows))
     assert load_collection(path) == rows
 
 
@@ -113,14 +122,26 @@ def test_h2_threshold_sets_are_singleton_or_full(shifted):
 def test_aci_restores_target_under_shift(shifted):
     eps = 0.1
     recs = records(aci_simulation(shifted, eps))
-    static = float(row(recs, policy=f"conformal@{eps}")["auto_err"])
-    aci = row(recs, policy=f"aci@{eps}", audit_rate="0.2")
-    assert float(aci["auto_err"]) <= 1.5 * eps < static
     cols = ("auto_err", "tail_auto_err", "automation", "final_alpha")
-    assert values(aci, *cols) == pytest.approx((0.095, 0.095, 0.466, 0.041), abs=1e-3)
-    assert values(row(recs, policy=f"arisk@{eps}", audit_rate="0.2"), *cols) == pytest.approx(
-        (0.177, 0.200, 0.661, 0.223), abs=1e-3)
+    pins = {("conformal", "aci"): (0.062, 0.040, 0.303, 0.020), ("risk", "arisk"): (0.106, 0.125, 0.414, 0.001)}
+    for (static, adaptive), pin in pins.items():
+        got = row(recs, policy=f"{adaptive}@{eps}", audit_rate="0.2")
+        assert float(got["auto_err"]) <= 1.5 * eps < float(row(recs, policy=f"{static}@{eps}")["auto_err"])
+        assert values(got, *cols) == pytest.approx(pin, abs=1e-3)
     assert float(row(recs, policy=f"aci@{eps}", audit_rate="0")["final_alpha"]) == 0.5
+
+
+def test_ablation_table_joins_by_id():
+    compact = [{**r, "mode": "compact", "latency_ms": 100.0, "state_chars": 1000, "n_perm": 5}
+               for r in synthetic_rows(30, 0) if r["split"] == "test_in"]
+    shared = compact[::3]
+    full = [{**r, "mode": "full", "latency_ms": 300.0, "state_chars": 8000, "n_perm": 3,
+             "probs": {o: float(o == r["gold_id"]) for o in r["option_ids"]}} for r in shared]
+    recs = records(ablation_table(compact, full + [{**full[0], "id": "only-full"}]))
+    acc = m.accuracy([r["probs"] for r in shared], [r["gold_id"] for r in shared])
+    assert [r["mode"] for r in recs] == ["compact", "full"]
+    for rec, pin in zip(recs, [(10, acc, 100, 1000, 5), (10, 1.0, 300, 8000, 3)]):
+        assert values(rec, "n", "acc", "latency_ms", "state_chars", "n_perm") == pytest.approx(pin, abs=1e-3)
 
 
 def test_risk_coverage_plot_writes_png(tmp_path):

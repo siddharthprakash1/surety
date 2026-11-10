@@ -22,8 +22,18 @@ TAIL = 200
 
 
 def load_collection(path: Path) -> list[dict]:
+    rows = []
     with open(path) as f:
-        return [json.loads(line) for line in f if line.strip()]
+        for line in f:
+            if not line.strip():
+                continue
+            try:
+                rows.append(json.loads(line))
+            except json.JSONDecodeError:
+                # a live collection may still be writing its last line
+                if line.endswith("\n"):
+                    raise
+    return rows
 
 
 def _split(rows, probs, split):
@@ -136,6 +146,18 @@ def aci_simulation(rows, eps, audit_rates=(0.0, 0.05, 0.2), gamma=0.02, seed=0, 
             policy.fit(*cal)
             body.append(_aci_row(policy, f"{r:g}", _stream(policy, p, g, r, seed), g, policy.alpha))
     return _table(("policy", "audit_rate", "n", "auto_err", "tail_auto_err", "automation", "final_alpha"), body)
+
+
+def ablation_table(rows_compact, rows_full) -> str:
+    full = {r["id"]: r for r in rows_full}
+    pairs = [(r, full[r["id"]]) for r in rows_compact if r["id"] in full]
+    body = []
+    for rs in zip(*pairs):
+        p, g = [r["probs"] for r in rs], [r["gold_id"] for r in rs]
+        body.append([", ".join(sorted({r["mode"] for r in rs})), len(rs), m.accuracy(p, g), m.ece(p, g),
+                     m.brier(p, g), round(np.mean([r["latency_ms"] for r in rs])),
+                     round(np.mean([r["state_chars"] for r in rs])), float(np.mean([r["n_perm"] for r in rs]))])
+    return _table(("mode", "n", "acc", "ECE", "Brier", "latency_ms", "state_chars", "n_perm"), body)
 
 
 def risk_coverage_plot(rows, out_png: Path, vs=None) -> None:

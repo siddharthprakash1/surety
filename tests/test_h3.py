@@ -32,7 +32,7 @@ def test_h3_table_two_conditions():
     assert t["set"]["abstain"] == "0.250" and t["set"]["unparsed"] == "0.250" and t["set"]["fallback"] == "0.250"
     assert t["set"]["acc_given_answer"] == "1.000" and t["set"]["acc_gold_in_set"] == "1.000"
     assert t["full"]["prompt_tok"] == "1000.000" and t["set"]["prompt_tok"] == "400.000"
-    assert "gold_in_set" in out and "element_grounding n=0" in out
+    assert "0.500; action_prediction n=4" in out
 
 
 def test_h3_table_legacy_null_counts_as_abstain():

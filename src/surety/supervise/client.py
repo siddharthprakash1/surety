@@ -4,7 +4,7 @@ from dataclasses import dataclass
 
 import httpx
 
-from surety.supervise.prompts import build_choose_prompt
+from surety.supervise.prompts import build_choose_prompt, build_slot_prompt
 from surety.types import DecisionState
 
 
@@ -42,11 +42,9 @@ class Supervisor:
         self.temperature = temperature
         self.reasoning = reasoning
 
-    def choose(self, state: DecisionState, candidate_ids: list[str] | None = None) -> tuple[str | None, Usage]:
-        allowed = candidate_ids if candidate_ids is not None else [o.id for o in state.options]
-        messages = build_choose_prompt(state, candidate_ids)
+    def _complete(self, messages: list[dict]) -> tuple[str, Usage]:
         if self.reasoning:
-            messages[0]["content"] = f"Reasoning: {self.reasoning}\n{messages[0]['content']}"
+            messages = [{**messages[0], "content": f"Reasoning: {self.reasoning}\n{messages[0]['content']}"}, *messages[1:]]
         payload = {
             "model": self.model,
             "messages": messages,
@@ -63,22 +61,37 @@ class Supervisor:
         choice = body["choices"][0]
         msg = choice["message"]
         text = msg.get("content") or ""
-        last = False
         if not text.strip():
             think = msg.get("reasoning") or msg.get("reasoning_content") or ""
             if think.strip() and choice.get("finish_reason") != "length":
                 usage.fallback_parsed = True
-                text, last = think[-200:], True
-        chosen = _parse(text, allowed, last)
+                text = think[-200:]
+        return text, usage
+
+    def choose(self, state: DecisionState, candidate_ids: list[str] | None = None) -> tuple[str | None, Usage]:
+        allowed = candidate_ids if candidate_ids is not None else [o.id for o in state.options]
+        text, usage = self._complete(build_choose_prompt(state, candidate_ids))
+        chosen = _parse(text, allowed, last=usage.fallback_parsed)
         usage.abstained = chosen is None and _is_none(text)
         return chosen, usage
 
+    def slot_value(self, state: DecisionState, element_id: str) -> tuple[str | None, Usage]:
+        text, usage = self._complete(build_slot_prompt(state, element_id))
+        return text.strip() or None, usage
+
 
 class MockSupervisor:
-    def __init__(self, answer: str | None):
+    def __init__(self, answer: str | None, slots: dict[str, str] | None = None):
         self.answer = answer
+        self.slots = slots or {}
         self.calls = 0
+        self.candidates: list[list[str] | None] = []
 
     def choose(self, state: DecisionState, candidate_ids: list[str] | None = None) -> tuple[str | None, Usage]:
         self.calls += 1
+        self.candidates.append(candidate_ids)
         return self.answer, Usage(0, 0, 0.0)
+
+    def slot_value(self, state: DecisionState, element_id: str) -> tuple[str | None, Usage]:
+        self.calls += 1
+        return self.slots.get(element_id), Usage(0, 0, 0.0)
