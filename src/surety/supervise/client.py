@@ -77,7 +77,9 @@ class Supervisor:
 
     def slot_value(self, state: DecisionState, element_id: str) -> tuple[str | None, Usage]:
         text, usage = self._complete(build_slot_prompt(state, element_id))
-        return text.strip() or None, usage
+        if usage.fallback_parsed:
+            return None, usage
+        return (text.strip().splitlines() or [""])[0].strip() or None, usage
 
 
 class MockSupervisor:

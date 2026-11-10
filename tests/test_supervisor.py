@@ -111,6 +111,18 @@ def test_slot_value_empty_is_none(httpx_mock):
     assert _sup().slot_value(_state(), "a1")[0] is None
 
 
+def test_slot_value_never_from_reasoning(httpx_mock):
+    body = {"choices": [{"message": {"content": "", "reasoning": "the user wants shoes so type shoes"}}]}
+    httpx_mock.add_response(url="http://sup/v1/chat/completions", json=body)
+    text, usage = _sup().slot_value(_state(), "a1")
+    assert text is None and usage.fallback_parsed
+
+
+def test_slot_value_first_line_only(httpx_mock):
+    _reply(httpx_mock, "\n shoes \nbecause the task says so")
+    assert _sup().slot_value(_state(), "a1")[0] == "shoes"
+
+
 def test_mock_supervisor_slots_and_candidates():
     m = MockSupervisor("a1", slots={"b2": "x"})
     assert m.slot_value(_state(), "b2")[0] == "x" and m.slot_value(_state(), "a1")[0] is None
