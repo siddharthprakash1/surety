@@ -10,3 +10,5 @@ results/**/*.png
 .DS_Store
 .env
 .claude/
+
+!artifacts/m1/*.jsonl

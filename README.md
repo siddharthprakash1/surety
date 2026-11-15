@@ -44,14 +44,14 @@ Offline, on [WebJev](https://huggingface.co/datasets/Lexmount/WebJev): Kev-4B ze
 | 0.1 | arisk, r=0.05 | 0.125 | 0.040 | 0.320 |
 | 0.1 | arisk, r=0.2 | 0.082 | 0.035 | 0.320 |
 
-**H3: supervisor (gpt-oss:20b) on escalated rows, full option list vs LAC set (ε=0.1)**
+**H3: supervisor (gpt-oss:20b) on escalated rows, full option list vs LAC set (ε=0.1), paired re-run**
 
-| cond | n | acc | abstain | unparsed | acc_given_answer | prompt_tok | completion_tok | latency_ms |
-|---|---|---|---|---|---|---|---|---|
-| full | 97 | 0.268 | 0.041 | 0.464 | 0.542 | 1988.309 | 253.155 | 19893.480 |
-| set | 103 | 0.223 | 0.097 | 0.563 | 0.657 | 1494.845 | 239.981 | 14965.849 |
+| cond | n | acc | abstain | unparsed | acc_given_answer | acc_gold_in_set | prompt_tok | completion_tok | latency_ms |
+|---|---|---|---|---|---|---|---|---|---|
+| full | 95 | 0.326 | 0.053 | 0.368 | 0.564 | 0.342 | 1700 | 231 | 9543 |
+| set | 95 | 0.189 | 0.063 | 0.579 | 0.529 | 0.228 | 1371 | 238 | 8049 |
 
-gold_in_set (LAC coverage on escalated rows): 0.816.
+gold_in_set (LAC coverage on the H3 sample): 0.832; paired n=95 (action_prediction 45, element_grounding 50).
 
 **Ablation: compact vs full context (shared test_in ids, debiased)**
 
@@ -65,7 +65,7 @@ gold_in_set (LAC coverage on escalated rows): 0.816.
 - **H1: held, via temperature scaling only.** debiased+T vs first_run ECE: test_in 0.167 → 0.086, test_shift 0.114 → 0.077. Debiasing alone does not help: test_shift ECE 0.114 → 0.134, Brier up on every split.
 - **H2: held for risk control, not for LAC.** risk@ε meets ε on held-out sites (0.033 at ε=0.05, 0.047 at ε=0.1). The fitted threshold exceeds ε there (0.060, 0.105); fixed@0.55 gives 0.080, margin@0.1 0.293. Per-choice thresholds also stayed within ε in this run (0.048, 0.070), without a guarantee. LAC sets keep auto_err ≤ 0.002 but automate only 0.028–0.052.
 - **H2 adaptive: needs audits.** arisk at r=0 drifts to α=0.5 (auto_err 0.203 / 0.283). r=0.05 overshoots (tail 0.055 at ε=0.05; 0.125 overall at ε=0.1). r=0.2 stays within ε at both and automates more than static risk (0.247 vs 0.222; 0.320 vs 0.283). ACI on coverage is identical at every audit rate.
-- **H3: inconclusive.** 0.464 (full) and 0.563 (set) of supervisor replies have no parseable id. Among answered rows the set condition is more accurate (0.657 vs 0.542). Averaged over all rows, set prompts are 1495 vs 1988 tokens and 15.0 vs 19.9 s. Raw accuracy is lower with the set (0.223 vs 0.268).
+- **H3: not supported with this supervisor.** Paired re-run (n=95): the set condition is less accurate (0.189 vs 0.326; among answered rows 0.529 vs 0.564) and cheaper (1371 vs 1700 prompt tokens, 8.0 vs 9.5 s). 0.368 (full) and 0.579 (set) of replies have no parseable id, so the comparison rests on 60 / 40 answered rows. Needs a stronger supervisor before H3 is settled.
 - **H4: not run** (needs the live harness, M2).
 
 **Caveats**
@@ -77,7 +77,8 @@ gold_in_set (LAC coverage on escalated rows): 0.816.
 - test_in shares sites with cal; only test_shift measures site shift.
 - Risk control holds in expectation over calibration draws; q̂ is picked to maximise automation on cal (slight optimism).
 - Ablation: n=60, debiased without T, mismatched permutations (mean n_perm 4.233 vs 3.000).
-- H3: gpt-oss:20b at "Reasoning: low", max_tokens 1024, weaker than the spec's supervisor; n differs by condition (97 / 103); answered rows 48 (full) / 35 (set).
+- H3: gpt-oss:20b at "Reasoning: low", max_tokens 1024, weaker than the spec's supervisor; 5 of 100 sampled rows lost to Ollama errors; answered rows 60 (full) / 40 (set).
+- The temperature T and the gates are fitted on the same cal rows; the cal rows of `debiased+T` are in-sample.
 
 ## Reproduce
 
