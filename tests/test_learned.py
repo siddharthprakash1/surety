@@ -169,3 +169,61 @@ def test_adaptive_learned_doubly_robust_estimate(data):
 def test_adaptive_learned_rejects_bad_options(kw):
     with pytest.raises(ValueError):
         AdaptiveLearnedRisk(0.1, **kw)
+
+
+def test_noise_margin_and_barrier_constants():
+    from surety.gate.learned import barrier_k, noise_margin_target
+
+    assert noise_margin_target(0.05, 600, 0.2) == pytest.approx(0.0277, abs=5e-4)
+    assert noise_margin_target(0.1, 600, 0.2) == pytest.approx(0.0656, abs=5e-4)
+    assert noise_margin_target(0.05, 600, 1.0) == pytest.approx(0.05)  # no audit noise: no margin
+    # B = 30 errors allowed; k = 2: BinomCDF(2; 30, 0.2) = 0.044 <= 0.1 < BinomCDF(3; 30, 0.2) = 0.123
+    assert barrier_k(0.05, 600, 0.2, 0.1) == 2 and barrier_k(0.1, 600, 0.2, 0.1) == 7
+    assert barrier_k(0.05, 600, 1.0, 0.1) == 29  # every error seen: stop at the budget
+    assert barrier_k(0.01, 50, 0.2, 0.1) == -1  # budget 0: never act
+
+
+def test_barrier_stops_acting_after_k_audited_errors(data):
+    (cal_p, cal_g), (test_p, _) = data
+    g = AdaptiveLearnedRisk(0.1, gamma=0.0, horizon=600, audit_rate=0.2, barrier_delta=0.1)  # α fixed: same acts
+    g.fit(cal_p, cal_g)
+    acted = [p for p in test_p if len(g.prediction_set(p)) == 1]
+    assert g.k_max == 7 and len(acted) > 50
+    for p in acted[: g.k_max + 1]:
+        g.update(p, "wrong", weight=5.0)  # audited errors
+    assert g.audited_errors == g.k_max + 1
+    assert all(g.decide(p).action == "escalate" for p in acted)
+    g.update(acted[0], "wrong", weight=5.0)  # escalated now: not an act, not counted
+    assert g.audited_errors == g.k_max + 1
+
+
+def test_barrier_bounds_stream_errors_for_a_bad_executor():
+    """The executor's top pick is wrong on 40 % of steps; the gate acts on everything until the barrier trips.
+    P(errors > εT) must stay ≤ δ (= 0.1) whatever the gate does before that."""
+    import random
+
+    eps, t, r = 0.05, 400, 0.2
+    over = 0
+    for seed in range(300):
+        rng = random.Random(seed)
+        g = AdaptiveLearnedRisk(eps, horizon=t, audit_rate=r, barrier_delta=0.1)
+        g.models, g.oof, g.wrong = [object()], np.array([0.0]), np.array([0.0])  # bypass fit: act whenever allowed
+        g.score = lambda probs: 0.0
+        g._tau = lambda: -math.inf if g.audited_errors > g.k_max else 1.0
+        errors = 0
+        for _ in range(t):
+            p = {"a": 0.9, "b": 0.1}
+            wrong = rng.random() < 0.4
+            gold = "b" if wrong else "a"
+            acted = len(g.prediction_set(p)) == 1
+            errors += acted and wrong
+            w = 1.0 if not acted else (1 / r if rng.random() < r else 0.0)
+            g.update(p, gold if w else "a", w)
+        over += errors > eps * t
+    assert over / 300 <= 0.1
+
+
+@pytest.mark.parametrize("kw", [{"margin": "noise"}, {"barrier_delta": 0.1}, {"barrier_delta": 0.1, "horizon": 600}])
+def test_stream_options_need_horizon_and_audit_rate(kw):
+    with pytest.raises(ValueError):
+        AdaptiveLearnedRisk(0.1, **kw)

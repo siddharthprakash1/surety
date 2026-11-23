@@ -86,7 +86,8 @@ def draws_table(records: list[dict], by_type: bool = False) -> str:
 
 
 def stream_draws(rows: list[dict], eps: float, makers: dict, audit_rate: float = 0.2, n_seeds: int = 200) -> str:
-    """Each adaptive gate on the same site-ordered test_shift streams and audit draws (as resample.adaptive_draws)."""
+    """Each adaptive gate on the same site-ordered test_shift streams and audit draws (as resample.adaptive_draws).
+    makers: name -> make(eps, horizon, audit_rate), horizon = the stream's length."""
     probs = variants(rows)["debiased+T"]
     cal = _split(rows, probs, "cal")
     body = []
@@ -95,7 +96,7 @@ def stream_draws(rows: list[dict], eps: float, makers: dict, audit_rate: float =
         for seed in range(n_seeds):
             order = _stream_order(rows, seed)
             p, g = [probs[i] for i in order], [rows[i]["gold_id"] for i in order]
-            policy = make(eps)
+            policy = make(eps, len(order), audit_rate)
             policy.fit(*cal)
             rng = random.Random(seed)
             sets = []
@@ -117,9 +118,13 @@ def stream_draws(rows: list[dict], eps: float, makers: dict, audit_rate: float =
 # arisk as in M1; the same score with alearned's step size and margin (target 0.8·eps); plain ACI on the learned score;
 # then the defaults of AdaptiveLearnedRisk without and with the margin
 ADAPTIVE = {
-    "arisk (γ 0.02)": lambda eps: AdaptiveRisk(eps),
-    "arisk (γ 0.005, target 0.8·eps)": lambda eps: AdaptiveRisk(0.8 * eps, gamma=0.005),
-    "alearned (γ 0.02, κ 0, ipw)": lambda eps: AdaptiveLearnedRisk(eps, gamma=0.02, margin=0.0, feedback="ipw"),
-    "alearned (γ 0.005, κ 0, dr)": lambda eps: AdaptiveLearnedRisk(eps, margin=0.0),
-    "alearned (γ 0.005, κ 0.2, dr): default": lambda eps: AdaptiveLearnedRisk(eps),
+    "arisk (γ 0.02)": lambda eps, t, r: AdaptiveRisk(eps),
+    "arisk (γ 0.005, target 0.8·eps)": lambda eps, t, r: AdaptiveRisk(0.8 * eps, gamma=0.005),
+    "alearned (γ 0.02, κ 0, ipw)": lambda eps, t, r: AdaptiveLearnedRisk(eps, gamma=0.02, margin=0.0, feedback="ipw"),
+    "alearned (γ 0.005, κ 0, dr)": lambda eps, t, r: AdaptiveLearnedRisk(eps, margin=0.0),
+    "alearned (γ 0.005, κ 0.2, dr): default": lambda eps, t, r: AdaptiveLearnedRisk(eps),
+    # research §3: a margin sized from the audit noise of a t-step stream, and the audited-error barrier (δ 0.1)
+    "alearned, noise-sized margin": lambda eps, t, r: AdaptiveLearnedRisk(eps, margin="noise", horizon=t, audit_rate=r),
+    "alearned default + barrier (δ 0.1)": lambda eps, t, r: AdaptiveLearnedRisk(eps, horizon=t, audit_rate=r,
+                                                                               barrier_delta=0.1),
 }

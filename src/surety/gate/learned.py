@@ -79,8 +79,10 @@ def crc_threshold(scores: np.ndarray, wrong: np.ndarray, eps: float) -> float:
 def binom_cdf(k: int, n: int, p: float) -> float:
     if k < 0:
         return 0.0
-    if k >= n:
+    if k >= n or p <= 0:
         return 1.0
+    if p >= 1:
+        return 0.0
     i = np.arange(k + 1)
     logs = (math.lgamma(n + 1) - np.array([math.lgamma(j + 1) + math.lgamma(n - j + 1) for j in i])
             + i * math.log(p) + (n - i) * math.log1p(-p))
@@ -165,29 +167,63 @@ class LearnedRisk(SplitConformal):
         return _escalate(c, "set") if c else _escalate([], "full_view")
 
 
+def noise_margin_target(eps: float, horizon: int, audit_rate: float, z: float = 1.645) -> float:
+    """ε' = x/T with x + z·√(x(1 − r)/r) = εT. With audits at rate r the error count of a T-step stream whose controller
+    aims at x varies by ≈ √(x(1 − r)/r) from audit noise alone, so aiming z of those below εT keeps most streams under
+    ε (docs/research/2026-11-24-improvements.md §3). No formal guarantee: shift adds its own term."""
+    c = z * math.sqrt((1 - audit_rate) / audit_rate)
+    s = (-c + math.sqrt(c * c + 4 * eps * horizon)) / 2
+    return s * s / horizon
+
+
+def barrier_k(eps: float, horizon: int, audit_rate: float, delta: float) -> int:
+    """Largest k with BinomCDF(k; ⌊εT⌋, r) ≤ δ, or -1. A gate that stops acting once more than k audited errors have
+    been seen makes more than εT errors in T steps with probability ≤ δ, for any stream: by optional skipping the audit
+    coins on error steps are i.i.d. Bern(r), so a (⌊εT⌋ + 1)-th error needs ≤ k audits among the first ⌊εT⌋."""
+    budget = math.floor(eps * horizon)
+    k = -1
+    while k + 1 <= budget and binom_cdf(k + 1, budget, audit_rate) <= delta:
+        k += 1
+    return k
+
+
 class AdaptiveLearnedRisk(_OnlineAlpha, LearnedRisk):
     """LearnedRisk with its CRC level α updated online from weighted feedback (ACI, as AdaptiveRisk), plus:
 
     - feedback="dr": an acted step's loss estimate is ê + w·(ℓ − ê), with ê the model's predicted error: an unaudited
       step (w = 0) counts ê instead of 0, an audited one (w = 1/r) corrects it. Unbiased for audits at a known rate, as
       the plain estimate w·ℓ ("ipw"), with lower variance when ê tracks the error; escalated steps have loss 0.
-    - margin κ: the online target is (1 − κ)·ε, a buffer for finite streams (ACI controls the long-run average only).
+    - margin κ: the online target is (1 − κ)·ε, a buffer for finite streams (ACI controls the long-run average only);
+      margin="noise" sizes it from the audit noise of a `horizon`-step stream audited at `audit_rate`.
+    - barrier_delta δ (needs horizon and audit_rate): stop acting after more than barrier_k(...) audited errors, so the
+      stream makes more than ε·horizon errors with probability ≤ δ. Not wired into the live specs: the guarantee needs
+      the horizon in advance and the error count carried across a resumed run.
     gamma 0.005, κ 0.2 and "dr" were chosen on M1's held-out streams (results/m1/kev_compact_learned.md).
     """
 
     def __init__(self, eps: float, gamma: float = 0.005, alpha_min: float = 0.001, alpha_max: float = 0.5,
-                 margin: float = 0.2, feedback: str = "dr", **kw):
+                 margin: float | str = 0.2, feedback: str = "dr", horizon: int | None = None,
+                 audit_rate: float | None = None, barrier_delta: float | None = None, **kw):
         super().__init__(eps, **kw)
-        if feedback not in ("dr", "ipw") or not 0 <= margin < 1:
-            raise ValueError(f"feedback {feedback!r} (dr|ipw), margin {margin} (in [0, 1))")
+        stream = horizon is not None and audit_rate is not None and horizon > 0 and 0 < audit_rate <= 1
+        if (feedback not in ("dr", "ipw") or (margin == "noise" and not stream)
+                or (margin != "noise" and not (isinstance(margin, float | int) and 0 <= margin < 1))
+                or (barrier_delta is not None and not (stream and 0 < barrier_delta < 1))):
+            raise ValueError(f"feedback {feedback!r} (dr|ipw), margin {margin!r} (in [0, 1), or 'noise' with horizon "
+                             f"and audit_rate), barrier_delta {barrier_delta!r} (needs horizon and audit_rate)")
         self.name = f"alearned@{eps}"
         self.gamma, self.alpha_min, self.alpha_max = gamma, alpha_min, alpha_max
         self.margin, self.feedback = margin, feedback
-        self.target = (1 - margin) * eps
+        self.target = (noise_margin_target(eps, horizon, audit_rate) if margin == "noise"
+                       else (1 - margin) * eps)
         self.alpha_raw = self.target
+        self.k_max = barrier_k(eps, horizon, audit_rate, barrier_delta) if barrier_delta is not None else None
+        self.audited_errors = 0
         self._cache: tuple[float, float] | None = None
 
     def _tau(self) -> float:
+        if self.k_max is not None and self.audited_errors > self.k_max:
+            return -math.inf
         if self.alpha <= self.alpha_min or not self.models:
             return -math.inf
         if self._cache is None or self._cache[0] != self.alpha:
@@ -205,5 +241,8 @@ class AdaptiveLearnedRisk(_OnlineAlpha, LearnedRisk):
         return e + weight * (loss - e)
 
     def update(self, probs: dict[str, float], gold: str, weight: float = 1.0) -> None:
-        est = self.loss_estimate(probs, gold, weight)
+        c = self.prediction_set(probs)
+        est = self.loss_estimate(probs, gold, weight)  # before the count below can trip the barrier
+        if len(c) == 1 and weight > 0 and gold not in c:
+            self.audited_errors += 1  # any labelled error of an act counts; extra labels only stop the barrier sooner
         self.alpha_raw = min(self.alpha_raw + self.gamma * (self.target - est), self.alpha_max)
