@@ -14,14 +14,15 @@ from pathlib import Path
 from surety.decide import MockBackend, SystemOneClient
 from surety.env import BrowserGymEnv
 from surety.eval.analyze import load_collection
-from surety.eval.live import SYSTEMS, h4_table, run_episodes
+from surety.eval.live import ALL_SYSTEMS, SYSTEMS, h4_table, run_episodes
 from surety.supervise.cli import add_supervisor_args, make_supervisor
 
 
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--tasks", required=True, help="comma list of MiniWoB++ task names, or @file with one per line")
-    ap.add_argument("--systems", default=",".join(SYSTEMS))
+    ap.add_argument("--systems", default=",".join(SYSTEMS),
+                    help=f"comma list from {','.join(ALL_SYSTEMS)}; default the six H4 systems")
     ap.add_argument("--seeds", default="0")
     ap.add_argument("--eps", type=float, default=0.05)
     ap.add_argument("--audit-rate", type=float, default=0.2)
@@ -35,6 +36,9 @@ def main() -> int:
     add_supervisor_args(ap)
     ap.add_argument("--out", type=Path, required=True)
     a = ap.parse_args()
+    unknown = [s for s in a.systems.split(",") if s not in ALL_SYSTEMS]
+    if unknown:
+        sys.exit(f"unknown systems {unknown}; choose from {sorted(ALL_SYSTEMS)}")
     if not os.environ.get("MINIWOB_URL"):
         sys.exit("MINIWOB_URL is not set (see scripts/run_miniwob.py)")
 

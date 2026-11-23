@@ -1,4 +1,5 @@
 from surety.gate.critical import CriticalDetector, CriticalOverride
+from surety.gate.learned import AdaptiveLearnedRisk, LearnedRisk
 from surety.gate.policies import (
     AdaptiveConformal,
     AdaptiveRisk,
@@ -14,7 +15,9 @@ from surety.gate.policies import (
 
 __all__ = [
     "AdaptiveConformal",
+    "AdaptiveLearnedRisk",
     "AdaptiveRisk",
+    "LearnedRisk",
     "CriticalDetector",
     "CriticalOverride",
     "EscalateOnNone",

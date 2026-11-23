@@ -20,6 +20,10 @@ from surety.trace import Trace
 
 SYSTEMS = {"supervisor": "supervisor", "executor": "executor", "fixed": "fixed:0.7",
            "escalate_on_none": "escalate_on_none", "risk": "risk:{eps}", "arisk": "arisk:{eps}"}
+# opt-in (--systems): gates on the learned error score (results/m1/kev_compact_learned.md)
+EXTRA_SYSTEMS = {"learned": "learned_pac:{eps}", "alearned": "alearned:{eps}"}
+ALL_SYSTEMS = {**SYSTEMS, **EXTRA_SYSTEMS}
+AUDITED = {"arisk", "alearned"}  # adaptive gates learn from audits of acted steps
 MAX_ERRORS = 3  # consecutive failed episodes stop the run (a dead server), rather than record a stream of failures
 _EMPTY = {"reward": 0.0, "steps": 0, "executor_calls": 0, "supervisor_calls": 0, "acted": 0, "labeled": 0,
           "label_wrong": 0, "shadow_calls": 0, "choose_calls": 0, "unanswered": 0, "critical": []}
@@ -72,7 +76,7 @@ def run_episodes(tasks, systems, seeds, make_env, backend, supervisor, out: Path
     written = errors = 0
     with out.open("a") as f:
         for system in systems:
-            spec = SYSTEMS[system].format(eps=eps)
+            spec = ALL_SYSTEMS[system].format(eps=eps)
             gate, scaler = fit_gate(spec, rows if ":" in spec else None)
             if system in alpha and hasattr(gate, "alpha_raw"):
                 gate.alpha_raw = alpha[system]
@@ -94,7 +98,7 @@ def run_episodes(tasks, systems, seeds, make_env, backend, supervisor, out: Path
                         goal = env.reset(seed=seed)
                         ep = run(goal, env, backend, policy, supervisor, trace, max_steps=max_steps, n_perm=n_perm,
                                  n_perm_large=n_perm_large, calibrate=scaler.apply if scaler else None,
-                                 audit_rate=audit_rate if system == "arisk" else 0.0, rng=rng,
+                                 audit_rate=audit_rate if system in AUDITED else 0.0, rng=rng,
                                  shadow_rate=shadow_rate, shadow_rng=shadow_rng)
                         rec.update(reward=float(env.reward), stop=ep.stop_reason, steps=len(ep.steps),
                                    executor_calls=ep.executor_calls, supervisor_calls=ep.supervisor_calls,
@@ -126,7 +130,7 @@ def h4_table(records: list[dict]) -> str:
     ok = [r for r in records if not r["stop"].startswith("error:")]
     sup = {(r["seed"], r["task"]): r for r in ok if r["system"] == "supervisor"}
     body = []
-    for system in [s for s in SYSTEMS if any(r["system"] == s for r in records)]:
+    for system in [s for s in ALL_SYSTEMS if any(r["system"] == s for r in records)]:
         rs = [r for r in ok if r["system"] == system]
         errs = sum(r["system"] == system and r["stop"].startswith("error:") for r in records)
         if not rs:

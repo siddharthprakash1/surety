@@ -53,3 +53,12 @@ def test_adaptive_spec_sets_gamma_and_fitted_spec_needs_rows():
 def test_rejected_specs(spec):
     with pytest.raises(ValueError):
         fit_gate(spec, _rows())
+
+
+def test_learned_specs():
+    from surety.gate import AdaptiveLearnedRisk, LearnedRisk
+
+    crc, pac, ada = (fit_gate(s, _rows(), gamma=0.05)[0] for s in ("learned:0.1", "learned_pac:0.1", "alearned:0.1"))
+    assert type(crc) is LearnedRisk and crc.delta is None and crc.models
+    assert type(pac) is LearnedRisk and pac.delta == 0.1 and pac.tau <= crc.tau
+    assert isinstance(ada, AdaptiveLearnedRisk) and ada.gamma == 0.05 and ada.models

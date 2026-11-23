@@ -156,3 +156,17 @@ def test_h4_two_point_margin_is_inclusive():
     recs = [{**base, "system": "supervisor", "task": f"t{i}", "reward": 1.0, "supervisor_calls": 10} for i in range(50)]
     recs += [{**base, "system": "executor", "task": f"t{i}", "reward": float(i > 0)} for i in range(50)]
     assert h4_table(recs).splitlines()[-1].endswith("| True |")  # 49/50 vs 50/50 is exactly 2 points
+
+
+def test_learned_systems_are_opt_in_and_only_the_adaptive_one_is_audited(tmp_path):
+    from surety.eval.live import SYSTEMS
+
+    assert "learned" not in SYSTEMS and "alearned" not in SYSTEMS  # the six H4 systems stay the default
+    out = tmp_path / "learned.jsonl"
+    run_episodes([f"t{i}" for i in range(6)], ["learned", "alearned"], [0], OneButton, MockBackend(_confident),
+                 MockSupervisor("e1"), out, rows=_cal_rows(), eps=0.1, audit_rate=0.5, max_steps=3)
+    recs = _read(out)
+    by = {s: [r for r in recs if r["system"] == s] for s in ("learned", "alearned")}
+    assert {r["spec"] for r in by["learned"]} == {"learned_pac:0.1"} and {r["spec"] for r in by["alearned"]} == {"alearned:0.1"}
+    assert all(r["acted"] for r in recs) and all(r["reward"] == 1.0 for r in recs)
+    assert sum(r["labeled"] for r in by["learned"]) == 0 < sum(r["labeled"] for r in by["alearned"])
