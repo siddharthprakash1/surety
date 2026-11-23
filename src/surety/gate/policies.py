@@ -87,6 +87,18 @@ class Margin(_Static):
         return _escalate([], "low_margin")
 
 
+class EscalateOnNone(_Static):
+    """Baseline (spec: Jev-Mobile rule): act on the top option unless it is done/blocked (none_of_these)."""
+
+    def __init__(self, none_id: str = "none_of_these"):
+        self.none_id = none_id
+        self.name = "escalate_on_none"
+
+    def decide(self, probs: dict[str, float]) -> GateDecision:
+        option_id = _top(probs)[0]
+        return _escalate([], "none_of_these") if option_id == self.none_id else _act(option_id, "top")
+
+
 class FittedThreshold(FixedThreshold):
     def __init__(self, eps: float):
         super().__init__(math.inf)
@@ -213,7 +225,8 @@ class RiskConformal(SplitConformal):
         if len(c) == 1:
             return _act(c[0], "singleton")
         lac = _lac_set(probs, self.lac_q)
-        return _escalate(lac, "set" if lac else "empty_set")
+        # a one-element LAC set is the executor's own pick: show the full list instead of a confirm prompt
+        return _escalate(lac, "set") if len(lac) >= 2 else _escalate([], "full_view")
 
     def _lookup(self, level: float) -> float:
         # ℓ̃ is pointwise non-increasing in q, so any data-dependent q* ≥ q̂_min keeps E[ℓ̃(q*)] ≤ ε

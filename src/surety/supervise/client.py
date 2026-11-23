@@ -1,3 +1,4 @@
+import json
 import re
 import time
 from dataclasses import dataclass
@@ -32,17 +33,37 @@ def _is_none(text: str) -> bool:
     return re.search(r"(?<![\w-])NONE(?![\w-])", text) is not None
 
 
+def _id_schema(allowed: list[str]) -> dict:
+    return {"name": "answer", "strict": True,
+            "schema": {"type": "object", "properties": {"id": {"type": "string", "enum": [*allowed, "NONE"]}},
+                       "required": ["id"], "additionalProperties": False}}
+
+
+def _json_id(text: str) -> str | None:
+    try:
+        value = json.loads(text)
+    except json.JSONDecodeError:
+        return None
+    return value.get("id") if isinstance(value, dict) and isinstance(value.get("id"), str) else None
+
+
 class Supervisor:
+    """json_mode: the reply is constrained to {"id": <allowed id> | "NONE"} (OpenAI-style response_format
+    json_schema; OpenAI, vLLM, Ollama, OpenRouter accept it); free-text parsing remains the fallback."""
+
     def __init__(self, base_url: str, model: str, timeout: float = 300.0,
-                 max_tokens: int = 64, temperature: float = 0.0, reasoning: str | None = None):
+                 max_tokens: int = 64, temperature: float = 0.0, reasoning: str | None = None,
+                 api_key: str | None = None, json_mode: bool = False):
         self.base_url = base_url.rstrip("/")
         self.model = model
         self.timeout = timeout
         self.max_tokens = max_tokens
         self.temperature = temperature
         self.reasoning = reasoning
+        self.headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
+        self.json_mode = json_mode
 
-    def _complete(self, messages: list[dict]) -> tuple[str, Usage]:
+    def _complete(self, messages: list[dict], schema: dict | None = None) -> tuple[str, Usage]:
         if self.reasoning:
             messages = [{**messages[0], "content": f"Reasoning: {self.reasoning}\n{messages[0]['content']}"}, *messages[1:]]
         payload = {
@@ -51,8 +72,11 @@ class Supervisor:
             "max_tokens": self.max_tokens,
             "temperature": self.temperature,
         }
+        if schema:
+            payload["response_format"] = {"type": "json_schema", "json_schema": schema}
         t0 = time.perf_counter()
-        r = httpx.post(f"{self.base_url}/v1/chat/completions", json=payload, timeout=self.timeout)
+        r = httpx.post(f"{self.base_url}/v1/chat/completions", json=payload, headers=self.headers,
+                       timeout=self.timeout)
         latency = (time.perf_counter() - t0) * 1000
         r.raise_for_status()
         body = r.json()
@@ -70,7 +94,11 @@ class Supervisor:
 
     def choose(self, state: DecisionState, candidate_ids: list[str] | None = None) -> tuple[str | None, Usage]:
         allowed = candidate_ids if candidate_ids is not None else [o.id for o in state.options]
-        text, usage = self._complete(build_choose_prompt(state, candidate_ids))
+        text, usage = self._complete(build_choose_prompt(state, candidate_ids),
+                                     _id_schema(allowed) if self.json_mode else None)
+        if self.json_mode and not usage.fallback_parsed and (got := _json_id(text)) is not None:
+            usage.abstained = got == "NONE"
+            return (got if got in allowed else None), usage
         chosen = _parse(text, allowed, last=usage.fallback_parsed)
         usage.abstained = chosen is None and _is_none(text)
         return chosen, usage
@@ -83,6 +111,8 @@ class Supervisor:
 
 
 class MockSupervisor:
+    model, json_mode = "mock", False
+
     def __init__(self, answer: str | None, slots: dict[str, str] | None = None):
         self.answer = answer
         self.slots = slots or {}

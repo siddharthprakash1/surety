@@ -2,6 +2,7 @@ from surety.gate.critical import CriticalDetector, CriticalOverride
 from surety.gate.policies import (
     AdaptiveConformal,
     AdaptiveRisk,
+    EscalateOnNone,
     FittedThreshold,
     FixedThreshold,
     GatePolicy,
@@ -16,6 +17,7 @@ __all__ = [
     "AdaptiveRisk",
     "CriticalDetector",
     "CriticalOverride",
+    "EscalateOnNone",
     "FittedThreshold",
     "FixedThreshold",
     "GatePolicy",

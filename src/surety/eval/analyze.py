@@ -1,4 +1,5 @@
 import json
+import math
 import random
 from pathlib import Path
 
@@ -238,4 +239,18 @@ def h3_table(rows) -> str:
     types = sorted({r["task_type"] for r in sets})
     per = ", ".join(f"{t} n={sum(r['task_type'] == t for r in sets)}" for t in types)
     cov = float(np.mean([r["gold_in_set"] for r in sets])) if sets else float("nan")
-    return table + f"\ngold_in_set (LAC coverage on the H3 sample): {cov:.3f}; paired n={len(paired)}; {per}\n"
+    # like for like: parse failures differ by condition, so compare on ids both conditions answered
+    ans = {c: {r["id"]: r["correct"] for r in rows if r["cond"] == c and r["chosen"] is not None} for c in ("full", "set")}
+    both = sorted(set(ans["full"]) & set(ans["set"]))
+    f, s = [ans["full"][i] for i in both], [ans["set"][i] for i in both]
+    b, c = sum(x and not y for x, y in zip(f, s)), sum(y and not x for x, y in zip(f, s))
+    acc = lambda v: f"{np.mean(v):.3f}" if v else "nan"  # noqa: E731
+    return (table + f"\ngold_in_set (LAC coverage on the H3 sample): {cov:.3f}; paired n={len(paired)}; {per}\n"
+            f"both answered n={len(both)}: acc full {acc(f)} / set {acc(s)}; discordant full-only {b} / set-only {c}; "
+            f"exact McNemar p={_mcnemar(b, c):.3f}\n")
+
+
+def _mcnemar(b: int, c: int) -> float:
+    """Exact two-sided McNemar (binomial) p-value on the discordant pairs."""
+    n = b + c
+    return min(1.0, 2 * sum(math.comb(n, k) for k in range(min(b, c) + 1)) / 2 ** n) if n else 1.0

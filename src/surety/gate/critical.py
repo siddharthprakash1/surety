@@ -11,7 +11,7 @@ _STEMS = {
         r"buy\w*",
         r"place[\s-]+(?:your[\s-]+)?order",
         r"check[\s-]?out\b",
-        r"confirm[\s-]+(?:your[\s-]+)?order",
+        r"(?:submit|complete|confirm)[\s-]+(?:your[\s-]+|my[\s-]+)?(?:order|purchase|payment)",
         r"subscri\w*",
         r"add[\s-]+(?:a[\s-]+)?card",
     ],
@@ -34,14 +34,16 @@ _STEMS = {
     "credentials": [
         r"password",
         r"passcode",
-        r"card[\s-]+number",
-        r"cvv\b",
-        r"cvc\b",
+        r"card[\s-]+(?:number|no)\b",
+        r"cv[vc]\d?\b",
+        r"security[\s-]+code",
+        r"pin\b",
         r"social[\s-]+security",
         r"ssn\b",
         r"one[\s-]time[\s-]+(?:code|password)",
+        r"verification[\s-]+code",
         r"otp\b",
-        r"expiry",
+        r"expir\w*",
     ],
 }
 _RULES = {cat: re.compile(rf"\b(?:{'|'.join(stems)})", re.IGNORECASE) for cat, stems in _STEMS.items()}
@@ -51,6 +53,10 @@ class CriticalDetector:
     def classify(self, label: str, url: str = "") -> str | None:
         text = f"{label} {url}"
         return next((cat for cat, rule in _RULES.items() if rule.search(text)), None)
+
+    def credential(self, label: str) -> bool:
+        """Independent of category order: 'Enter your password to delete your account' classifies as destructive."""
+        return bool(_RULES["credentials"].search(label))
 
 
 class CriticalOverride:

@@ -21,6 +21,19 @@ def _is_password(role: str, props: dict) -> bool:
     return "password" in role.lower() or str(props.get("type") or "").lower() == "password"
 
 
+def _dom_attrs(dom: dict) -> dict[str, dict[str, str]]:
+    """bid -> DOM attributes from the CDP DOMSnapshot. Chrome's AX tree reports a password input as an unnamed
+    textbox with no type (checked on MiniWoB login-user), so the input type and fallback names come from here."""
+    s = dom.get("strings") or []
+    out = {}
+    for doc in dom.get("documents") or []:
+        for attrs in (doc.get("nodes") or {}).get("attributes") or []:
+            pairs = {s[attrs[k]]: s[attrs[k + 1]] for k in range(0, len(attrs) - 1, 2)}
+            if "bid" in pairs:
+                out[pairs["bid"]] = pairs
+    return out
+
+
 class BrowserGymEnv:
     def __init__(self, task_name: str, headless: bool = True):
         import gymnasium
@@ -40,14 +53,16 @@ class BrowserGymEnv:
 
     def observe(self) -> Page:
         extra = self.obs.get("extra_element_properties") or {}
+        dom = _dom_attrs(self.obs.get("dom_object") or {})
         elements, text = [], []
         for node in self.obs["axtree_object"]["nodes"]:
             role, name, bid = _v(node, "role"), _v(node, "name"), node.get("browsergym_id")
             if role == "StaticText" and name:
                 text.append(name)
-            props = _props(node)
-            if _is_password(role, props):
+            props, attrs = _props(node), dom.get(str(bid), {})
+            if _is_password(role, props) or attrs.get("type", "").lower() == "password":
                 role = "password"
+            name = name or next((attrs[k] for k in ("placeholder", "name", "id") if attrs.get(k)), "")
             if node.get("ignored") or bid is None or role not in ROLES:
                 continue
             if props.get("disabled") or extra.get(bid, {}).get("visibility", 1.0) < MIN_VISIBILITY:
