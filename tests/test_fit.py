@@ -62,3 +62,9 @@ def test_learned_specs():
     assert type(crc) is LearnedRisk and crc.delta is None and crc.models
     assert type(pac) is LearnedRisk and pac.delta == 0.1 and pac.tau <= crc.tau
     assert isinstance(ada, AdaptiveLearnedRisk) and ada.gamma == 0.05 and ada.models
+
+
+def test_adaptive_specs_keep_their_own_step_size_by_default():
+    assert fit_gate("arisk:0.05", _rows())[0].gamma == 0.02
+    assert fit_gate("aci:0.05", _rows())[0].gamma == 0.02
+    assert fit_gate("alearned:0.05", _rows())[0].gamma == 0.005  # as tuned (results/m1/kev_compact_learned.md)

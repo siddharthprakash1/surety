@@ -1,7 +1,9 @@
 import importlib
+import re
 
 import numpy as np
 
+from surety.env.base import EnvClosedError
 from surety.env.page import Action, Element, Page
 
 ROLES = {"link", "button", "textbox", "checkbox", "combobox", "menuitem", "option", "radio", "tab", "searchbox",
@@ -20,6 +22,8 @@ TYPE_FORMATS = {"date": "YYYY-MM-DD", "datetime-local": "YYYY-MM-DDTHH:MM", "tim
 FORM_ROLES = {"checkbox", "radio", "textbox", "searchbox", "combobox", "spinbutton", "password", "switch", "slider",
               "listbox"}
 # autocomplete tokens of secret fields: an unnamed Stripe-style card input is only recognisable by these
+CLOSED = re.compile(r"(?:target|page|context|browser)[\w ,]{0,40}(?:has been|was|is) closed|target closed"
+                    r"|page crashed|browser has disconnected|connection closed", re.IGNORECASE)
 SECRET_AUTOCOMPLETE = ("cc-", "one-time-code", "current-password", "new-password")
 
 
@@ -123,7 +127,9 @@ class BrowserGymEnv:
                 continue
             own, nested = _own_text(node, by_id, set(role_of))
             attrs = dom.get(str(node.get("browsergym_id")), {})
-            target = next((b for b in nested if role_of[b] in FORM_ROLES), None) or by_dom_id.get(attrs.get("for", ""))
+            # HTML: a for= attribute names the control (none if it points nowhere); else the first nested control
+            target = (by_dom_id.get(attrs["for"]) if attrs.get("for")
+                      else next((b for b in nested if role_of[b] in FORM_ROLES), None))
             if target and role_of.get(target) in FORM_ROLES:
                 folded.add(id(node))  # not an option of its own: its control is, named by it
                 if text := _v(node, "name") or own:
@@ -146,7 +152,8 @@ class BrowserGymEnv:
             name = (name or label_of.get(bid) or next((attrs[k] for k in fallback if attrs.get(k)), ""))[:NAME_CHARS]
             if not name and extra_role:
                 continue
-            if fmt := DATE_FORMATS.get(ax_role) or TYPE_FORMATS.get(attrs.get("type", "").lower()):
+            # the input type first: Chrome gives month, week and datetime-local inputs the same DateTime role
+            if fmt := TYPE_FORMATS.get(attrs.get("type", "").lower()) or DATE_FORMATS.get(ax_role):
                 name = f"{name} ({fmt})".strip()
             value = "" if role == "password" else str(props["checked"]) if "checked" in props else _v(node, "value")
             elements.append(Element(f"bid:{bid}", role, name, value))
@@ -157,8 +164,9 @@ class BrowserGymEnv:
 
     def _step(self, action: str) -> None:
         self.obs, self.reward, self.terminated, self.truncated, _ = self.env.step(action)
-        if self.obs.get("last_action_error"):
-            raise RuntimeError(self.obs["last_action_error"])
+        if err := self.obs.get("last_action_error"):
+            # BrowserGym reports a dead browser like a rejected action; only the latter is an ordinary failure
+            raise (EnvClosedError if CLOSED.search(err) else RuntimeError)(err)
 
     def act(self, action: Action) -> None:
         bid = (action.element_id or "").removeprefix("bid:")

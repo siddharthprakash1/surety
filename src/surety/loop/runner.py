@@ -5,7 +5,7 @@ from urllib.parse import urlsplit
 
 from surety.compile import NONE_OF_THESE, compile_page
 from surety.decide import Backend
-from surety.env import Action, Env
+from surety.env import Action, Env, EnvClosedError
 from surety.gate import CriticalDetector, CriticalOverride, GatePolicy
 from surety.trace import Trace
 from surety.types import DecisionState
@@ -50,7 +50,8 @@ def _bare(url: str) -> str:
 def run(task: str, env: Env, backend: Backend, policy: GatePolicy, supervisor, trace: Trace | None = None,
         max_steps: int = 30, n_perm: int = 1, calibrate=None, audit_rate: float = 0.0,
         rng: random.Random | None = None, n_perm_large: int | None = None, large_options: int = 16,
-        shadow_rate: float = 0.0, shadow_rng: random.Random | None = None) -> Episode:
+        shadow_rate: float = 0.0, shadow_rng: random.Random | None = None,
+        audit_stats: list[int] | None = None) -> Episode:
     """calibrate: probs -> probs applied before the gate (the offline temperature). Online gate updates as offline
     (analyze._stream): escalated steps carry the supervisor's answer as the label (w=1); acted steps are audited with
     probability audit_rate (w=1/r; the audit answer is acted on); other steps update with w=0 (ε drift only).
@@ -58,7 +59,11 @@ def run(task: str, env: Env, backend: Backend, policy: GatePolicy, supervisor, t
     n_perm_large: orderings above large_options options, as the collection the gate was fitted on (5, 3 above 16).
     shadow_rate: evaluation only — an acted, unaudited step asks the supervisor (full list) with this probability and
     records the answer as row["shadow"]; nothing is acted on or learnt from it, and it is counted in shadow_calls.
-    shadow_rng draws the shadows apart from the audits, so turning shadows on leaves a run's audits unchanged."""
+    shadow_rng draws the shadows apart from the audits, so turning shadows on leaves a run's audits unchanged.
+    audit_stats: [asked, answered] audits over the caller's stream. An unanswered audit yields no label, so labels
+    arrive at rate r·q, not r; answered audits then weigh 1/(r·q̂), q̂ = answered / asked, which keeps the update
+    unbiased when the answer rate does not depend on the label (else, and without audit_stats, 1/r: biased low).
+    A dead browser (EnvClosedError, Playwright's TargetClosedError) is raised, not recorded as a failed step."""
     ep = Episode(task, [], "max_steps", 0, 0)
     if not isinstance(policy, CriticalOverride):
         policy = CriticalOverride(policy, _DETECTOR)
@@ -102,8 +107,12 @@ def run(task: str, env: Env, backend: Backend, policy: GatePolicy, supervisor, t
                 weight = 1.0
             elif audit_rate and rng.random() < audit_rate:
                 audited = row["audit"] = ask(None)
+                if audit_stats is not None:
+                    audit_stats[0] += 1
+                    audit_stats[1] += audited in labels
                 if audited in labels:
-                    chosen, weight = audited, 1 / audit_rate
+                    q = audit_stats[1] / audit_stats[0] if audit_stats else 1.0
+                    chosen, weight = audited, 1 / (audit_rate * q)
             elif shadow_rate and shadow_rng.random() < shadow_rate:
                 label, usage = supervisor.choose(state, None)
                 ep.shadow_calls += 1
@@ -148,6 +157,8 @@ def run(task: str, env: Env, backend: Backend, policy: GatePolicy, supervisor, t
             try:
                 env.act(action)
             except Exception as e:
+                if isinstance(e, EnvClosedError) or type(e).__name__ == "TargetClosedError":
+                    raise  # the episode could not run: the caller records error:<Type> and retries it
                 # only the type: env messages can echo typed text
                 row["error"] = type(e).__name__
                 stop = "error"

@@ -170,3 +170,23 @@ def test_learned_systems_are_opt_in_and_only_the_adaptive_one_is_audited(tmp_pat
     assert {r["spec"] for r in by["learned"]} == {"learned_pac:0.1"} and {r["spec"] for r in by["alearned"]} == {"alearned:0.1"}
     assert all(r["acted"] for r in recs) and all(r["reward"] == 1.0 for r in recs)
     assert sum(r["labeled"] for r in by["learned"]) == 0 < sum(r["labeled"] for r in by["alearned"])
+
+
+def test_a_failed_episode_leaves_no_trace_on_the_stream(tmp_path):
+    from surety.env import EnvClosedError
+
+    class DiesOnT0(OneButton):
+        def act(self, action):
+            if self.task == "t0":
+                raise EnvClosedError("Target page, context or browser has been closed")
+            super().act(action)
+
+    kw = dict(rows=_cal_rows(), eps=0.1, audit_rate=0.5, max_steps=3)
+    run_episodes(["t1", "t2"], ["alearned"], [0], OneButton, MockBackend(_confident), MockSupervisor("e1"),
+                 tmp_path / "a.jsonl", **kw)
+    run_episodes(["t0", "t1", "t2"], ["alearned"], [0], DiesOnT0, MockBackend(_confident), MockSupervisor("e1"),
+                 tmp_path / "b.jsonl", **kw)
+    a, b = _read(tmp_path / "a.jsonl"), _read(tmp_path / "b.jsonl")
+    assert b[0]["stop"] == "error:EnvClosedError"
+    key = lambda r: (r["task"], r["alpha_raw"], r["audit_rng"][1][0], r["audit_stats"])  # noqa: E731
+    assert [key(r) for r in b[1:]] == [key(r) for r in a] and a[-1]["audit_stats"][0] > 0

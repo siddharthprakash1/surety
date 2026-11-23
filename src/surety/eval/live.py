@@ -71,6 +71,8 @@ def run_episodes(tasks, systems, seeds, make_env, backend, supervisor, out: Path
         raise ValueError(f"{out} holds episodes run with {({k: bad.get(k) for k in settings})}; use another --out")
     done = {(r["system"], r["seed"], r["task"]) for r in old if not r["stop"].startswith("error:")}
     alpha = {r["system"]: r["alpha_raw"] for r in old if r.get("alpha_raw") is not None}  # file order = stream order
+    audits = {r["system"]: r["audit_stats"] for r in old if r.get("audit_stats") is not None}
+    barrier = {r["system"]: r["audited_errors"] for r in old if r.get("audited_errors") is not None}
     streams = {(r["system"], r["seed"]): (r["audit_rng"], r["shadow_rng"]) for r in old}
     del old  # each record carries two Mersenne Twister states (~15 KB); keep only the last per stream
     written = errors = 0
@@ -80,6 +82,9 @@ def run_episodes(tasks, systems, seeds, make_env, backend, supervisor, out: Path
             gate, scaler = fit_gate(spec, rows if ":" in spec else None)
             if system in alpha and hasattr(gate, "alpha_raw"):
                 gate.alpha_raw = alpha[system]
+            if system in barrier and hasattr(gate, "audited_errors"):
+                gate.audited_errors = barrier[system]
+            stats = list(audits.get(system, [0, 0]))  # [asked, answered] audits of this system's stream
             policy = CriticalOverride(gate, CriticalDetector())
             for seed in seeds:
                 if (system, seed) in streams:
@@ -92,6 +97,9 @@ def run_episodes(tasks, systems, seeds, make_env, backend, supervisor, out: Path
                     path = traces / f"{system}-{seed}-{task}.jsonl"
                     path.unlink(missing_ok=True)
                     rec, env, trace = {"system": system, "spec": spec, "seed": seed, "task": task, **settings}, None, None
+                    # a failed episode must leave no trace on the stream: its retry replays the same steps
+                    snap = (getattr(gate, "alpha_raw", None), getattr(gate, "audited_errors", None), rng.getstate(),
+                            shadow_rng.getstate(), list(stats))
                     try:
                         env = make_env(task)
                         trace = Trace(path)
@@ -99,7 +107,7 @@ def run_episodes(tasks, systems, seeds, make_env, backend, supervisor, out: Path
                         ep = run(goal, env, backend, policy, supervisor, trace, max_steps=max_steps, n_perm=n_perm,
                                  n_perm_large=n_perm_large, calibrate=scaler.apply if scaler else None,
                                  audit_rate=audit_rate if system in AUDITED else 0.0, rng=rng,
-                                 shadow_rate=shadow_rate, shadow_rng=shadow_rng)
+                                 shadow_rate=shadow_rate, shadow_rng=shadow_rng, audit_stats=stats)
                         rec.update(reward=float(env.reward), stop=ep.stop_reason, steps=len(ep.steps),
                                    executor_calls=ep.executor_calls, supervisor_calls=ep.supervisor_calls,
                                    acted=sum(s["decision"] == "act" for s in ep.steps), **_labels(ep.steps),
@@ -108,6 +116,13 @@ def run_episodes(tasks, systems, seeds, make_env, backend, supervisor, out: Path
                         errors = 0
                     except Exception as e:  # recorded, retried on resume
                         errors += 1
+                        if snap[0] is not None:
+                            gate.alpha_raw = snap[0]
+                        if snap[1] is not None:
+                            gate.audited_errors = snap[1]
+                        rng.setstate(snap[2])
+                        shadow_rng.setstate(snap[3])
+                        stats[:] = snap[4]
                         rec.update(_EMPTY, stop=f"error:{type(e).__name__}", error=str(e)[:300])
                     finally:
                         for closable in (trace, env):
@@ -117,7 +132,8 @@ def run_episodes(tasks, systems, seeds, make_env, backend, supervisor, out: Path
                             except Exception:  # a failing close must not lose the episode's record
                                 pass
                     rec.update(alpha_raw=getattr(gate, "alpha_raw", None), audit_rng=rng.getstate(),
-                               shadow_rng=shadow_rng.getstate())
+                               shadow_rng=shadow_rng.getstate(), audit_stats=list(stats),
+                               audited_errors=getattr(gate, "audited_errors", None))
                     f.write(json.dumps(rec) + "\n")
                     f.flush()
                     written += 1

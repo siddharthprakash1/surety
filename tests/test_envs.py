@@ -207,3 +207,40 @@ def test_browsergym_label_folding_edge_cases():
     by_id = {e.id: e for e in env.observe().elements}
     assert by_id["bid:81"].name == "x" * 80 and "bid:80" not in by_id          # long label folded
     assert by_id["bid:82"].name == "Pro plan" and by_id["bid:83"].name == "details"  # label around a link kept
+
+
+def test_browsergym_month_and_week_inputs_get_their_own_format():
+    # Chrome gives month, week and datetime-local inputs the same DateTime role: the input type decides the hint
+    env = _bg()
+    nodes = [_node("DateTime", "95", "Month"), _node("DateTime", "96", "Week"), _node("DateTime", "97", "When")]
+    env.obs = {**_obs(), "axtree_object": {"nodes": nodes},
+               "dom_object": _snapshot({"type": "month", "bid": "95"}, {"type": "week", "bid": "96"},
+                                       {"type": "datetime-local", "bid": "97"})}
+    assert [e.name for e in env.observe().elements] == ["Month (YYYY-MM)", "Week (YYYY-Www)",
+                                                         "When (YYYY-MM-DDTHH:MM)"]
+
+
+def test_browsergym_label_for_wins_over_a_nested_control():
+    # <label for=email>Email <input type=checkbox></label> <input id=email>: HTML names the email box, not the checkbox
+    env = _bg()
+    nodes = [_node("LabelText", "90", nodeId="a", childIds=["b", "c"]), _node("StaticText", name="Email", nodeId="b"),
+             _node("checkbox", "91", nodeId="c"), _node("textbox", "92", nodeId="d")]
+    env.obs = {**_obs(), "axtree_object": {"nodes": nodes}, "extra_element_properties": {"90": {"clickable": True}},
+               "dom_object": _snapshot({"for": "email", "bid": "90"}, {"type": "checkbox", "bid": "91"},
+                                       {"id": "email", "bid": "92"})}
+    assert env.observe().elements == [Element("bid:91", "checkbox", ""), Element("bid:92", "textbox", "Email")]
+
+
+def test_browsergym_dead_browser_raises_env_closed():
+    from surety.env import EnvClosedError
+
+    env = _bg()
+    env.env.step = lambda action: ({**_obs(), "last_action_error": "TargetClosedError: Target page, context or "
+                                    "browser has been closed"}, 0.0, False, False, {})
+    with pytest.raises(EnvClosedError):
+        env.act(Action("click", "bid:12"))
+    env.env.step = lambda action: ({**_obs(), "last_action_error": "Error: element is not visible"}, 0.0, False,
+                                   False, {})
+    with pytest.raises(RuntimeError) as e:
+        env.act(Action("click", "bid:12"))
+    assert not isinstance(e.value, EnvClosedError)

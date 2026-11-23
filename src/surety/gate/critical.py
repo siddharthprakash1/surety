@@ -18,7 +18,7 @@ _STEMS = {
     "destructive": [r"delet\w*", r"remov\w*", r"discard\w*", r"clear[\s-]+all", r"eras\w*", r"unsubscri\w*"],
     "send": [
         r"send\w*",
-        r"post\b",
+        r"post\b(?![\s-]*code)",  # not a postCode field
         r"publish\w*",
         r"repl(?:y|ies)\b",
         r"submit[\s-]+application",
@@ -34,7 +34,7 @@ _STEMS = {
     "credentials": [
         r"password",
         r"passcode",
-        r"card[\s-]*(?:number\b|no\b|#)",
+        r"card[\s-]*(?:number\b|num\b|no\b|#)",
         r"cc[\s-]*(?:num\w*|exp\w*|csc|cvv|cvc)\b",
         r"cv[vc]\d?\b",
         r"csc\b",
@@ -56,18 +56,27 @@ _RULES = {cat: re.compile(rf"\b(?:{'|'.join(stems)})", re.IGNORECASE) for cat, s
 
 
 def _words(text: str) -> str:
-    """DOM names as words: card_number, creditCardNumber -> card number, credit Card Number."""
-    return re.sub(r"(?<=[a-z])(?=[A-Z])", " ", text.replace("_", " "))
+    """DOM names as words: card_number, creditCardNumber, CVVCode -> card number, credit Card Number, CVV Code."""
+    text = re.sub(r"(?<=[a-z])(?=[A-Z])", " ", text.replace("_", " "))
+    return re.sub(r"(?<=[A-Z])(?=[A-Z][a-z])", " ", text)
+
+
+def _readings(text: str) -> tuple[str, str]:
+    """The text as written (underscores as spaces), then split into words. As written comes first: splitting turns
+    passCode into 'pass Code' (no stem) and UnSubscribe into 'Un Subscribe' (a payment stem)."""
+    return text.replace("_", " "), _words(text)
 
 
 class CriticalDetector:
     def classify(self, label: str, url: str = "") -> str | None:
-        text = _words(f"{label} {url}")
-        return next((cat for cat, rule in _RULES.items() if rule.search(text)), None)
+        for text in _readings(f"{label} {url}"):
+            if cat := next((cat for cat, rule in _RULES.items() if rule.search(text)), None):
+                return cat
+        return None
 
     def credential(self, label: str) -> bool:
         """Independent of category order: 'Enter your password to delete your account' classifies as destructive."""
-        return bool(_RULES["credentials"].search(_words(label)))
+        return any(_RULES["credentials"].search(text) for text in _readings(label))
 
 
 class CriticalOverride:

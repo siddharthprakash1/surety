@@ -338,3 +338,47 @@ def test_action_error_stops_after_recording(tmp_path):
     trace.close()
     assert ep.stop_reason == "error" and len(ep.steps) == 1 and ep.steps[0]["error"] == "RuntimeError"
     assert json.loads((tmp_path / "t.jsonl").read_text())["error"] == "RuntimeError"
+
+
+class AnswersEvery(MockSupervisor):
+    """Answers only on calls k, 2k, ...; None (unparsed) otherwise."""
+
+    def __init__(self, answer, k):
+        super().__init__(answer)
+        self.k = k
+
+    def choose(self, state, candidate_ids=None):
+        label, usage = super().choose(state, candidate_ids)
+        return (label if self.calls % self.k == 0 else None), usage
+
+
+def test_audit_weights_correct_for_unanswered_audits():
+    # every audit drawn (r = 1); half the replies unparsed: answered ones weigh 1/(r·q̂), q̂ = answered / asked
+    gate = Recorder(FixedThreshold(0.5))
+    stats = [0, 0]
+    run("go", FakeEnv([_page(BUTTON, LINK)]), always("e1"), gate, AnswersEvery("e2", 2), max_steps=4, audit_rate=1.0,
+        rng=random.Random(0), audit_stats=stats)
+    assert stats == [4, 2]
+    assert gate.updates == [("e1", 0.0), ("e2", 2.0), ("e1", 0.0), ("e2", 2.0)]  # q̂ = 1/2 after calls 2 and 4
+    gate = Recorder(FixedThreshold(0.5))
+    run("go", FakeEnv([_page(BUTTON, LINK)]), always("e1"), gate, AnswersEvery("e2", 2), max_steps=2, audit_rate=1.0,
+        rng=random.Random(0))
+    assert gate.updates == [("e1", 0.0), ("e2", 1.0)]  # no stats: 1/r, as before
+
+
+def test_a_dead_browser_is_raised_not_recorded_as_a_failed_step():
+    from surety.env import EnvClosedError
+
+    def die(env):
+        raise EnvClosedError("Target page, context or browser has been closed")
+
+    with pytest.raises(EnvClosedError):
+        run("go", FakeEnv([_page(BUTTON, LINK)], after_act=die), always("e1"), FixedThreshold(0.5),
+            MockSupervisor("e2"), max_steps=2)
+
+    def reject(env):
+        raise RuntimeError("element is not visible")
+
+    ep = run("go", FakeEnv([_page(BUTTON, LINK)], after_act=reject), always("e1"), FixedThreshold(0.5),
+             MockSupervisor("e2"), max_steps=2)
+    assert ep.stop_reason == "error" and ep.steps[0]["error"] == "RuntimeError"

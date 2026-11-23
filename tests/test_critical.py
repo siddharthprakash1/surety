@@ -119,3 +119,16 @@ def test_critical_override_delegates_fit_and_update():
     g.fit([{"a": 0.9, "b": 0.1}] * 20, ["a"] * 20)
     g.update({"a": 0.9, "b": 0.1}, "b")
     assert len(inner.scores) == 20 and inner.alpha < 0.1
+
+
+@pytest.mark.parametrize("name", ["passCode", "PassCode", "passWord", "PassWord", "CVVCode", "OTPCode", "SSNLast4",
+                                  "cardNum", "card_num", "ccnum", "creditCardNumber"])
+def test_credential_dom_names_read_as_written_and_as_words(name):
+    assert CriticalDetector().credential(name)
+
+
+@pytest.mark.parametrize("label,cat", [("UnSubscribe", "destructive"), ("postCode", None), ("zipCode", None),
+                                       ("deleteButton", "destructive"), ("submitOrder", "payment"),
+                                       ("Post comment", "send"), ("postReply", "send")])
+def test_camel_case_split_does_not_change_categories_read_as_written(label, cat):
+    assert CriticalDetector().classify(label) == cat
