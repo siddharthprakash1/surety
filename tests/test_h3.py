@@ -40,6 +40,13 @@ def test_h3_table_paired_conditions():
     assert t["set"]["acc_given_answer"] == "1.000" and t["set"]["acc_gold_in_set"] == "1.000"
     assert t["full"]["prompt_tok"] == "1000" and t["set"]["prompt_tok"] == "400"
     assert "H3 sample): 0.500; paired n=4; action_prediction n=4" in out
+    assert ("both answered n=2: acc full 1.000 / set 1.000; discordant full-only 0 / set-only 0; "
+            "exact McNemar p=1.000") in out
+
+
+def test_mcnemar_exact():
+    from surety.eval.analyze import _mcnemar
+    assert _mcnemar(5, 1) == 14 / 64 and _mcnemar(0, 0) == 1.0 and _mcnemar(3, 3) == 1.0
 
 
 def test_h3_table_legacy_null_counts_as_abstain():

@@ -1,10 +1,13 @@
 from surety.env.page import Action, Element, Page
 
-SELECTOR = ("a, button, input, select, textarea, [role=button], [role=link], [role=textbox], "
-            "[role=checkbox], [role=menuitem]")
+SELECTOR = ("a, button, input, select, textarea, summary, [onclick], [role=button], [role=link], [role=textbox], "
+            "[role=searchbox], [role=combobox], [role=listbox], [role=option], [role=checkbox], [role=radio], "
+            "[role=switch], [role=tab], [role=menuitem], [role=menuitemcheckbox], [role=menuitemradio], [role=treeitem]")
 MAX_ELEMENTS = 150
 TIMEOUT_MS = 5_000
 _TEXT_INPUTS = {"", "text", "email", "url", "tel", "number", "date", "time", "datetime-local", "month", "week"}
+# autocomplete tokens of secret inputs (unnamed Stripe-style card fields are only recognisable by these)
+_SECRET_AUTOCOMPLETE = ("cc-", "one-time-code", "current-password", "new-password")
 # visible, inside the viewport and enabled, so scrolling changes what is enumerated
 _JS = """els => els.map(el => {
   const r = el.getBoundingClientRect(), s = getComputedStyle(el);
@@ -14,6 +17,8 @@ _JS = """els => els.map(el => {
     tag: el.tagName.toLowerCase(), role: el.getAttribute('role') || '', type: (el.getAttribute('type') || '').toLowerCase(),
     aria: el.getAttribute('aria-label') || '', text: el.innerText || '', placeholder: el.getAttribute('placeholder') || '',
     name: el.getAttribute('name') || '', value: el.value == null ? '' : String(el.value),
+    autocomplete: (el.getAttribute('autocomplete') || '').toLowerCase(), title: el.getAttribute('title') || '',
+    alt: el.getAttribute('alt') || '', id: el.id || '',
     checked: typeof el.checked === 'boolean' ? String(el.checked) : (el.getAttribute('aria-checked') || ''),
   };
 })"""
@@ -23,13 +28,15 @@ def _role(d: dict) -> str:
     tag = d["tag"]
     # native form controls: the tag decides, since role=combobox is often a plain text input
     if tag == "input":
-        if d["type"] == "password":
+        if d["type"] == "password" or any(t.startswith(_SECRET_AUTOCOMPLETE) for t in d.get("autocomplete", "").split()):
             return "password"
         if d["type"] == "search" or d["role"] == "searchbox":
             return "searchbox"
         return "input" if d["type"] in _TEXT_INPUTS else d["type"]
     if tag in {"textarea", "select"}:
         return tag
+    if d["role"] in {"combobox", "listbox"}:
+        return "button"  # a scripted dropdown: click opens it, its options are then elements; select_option needs <select>
     return d["role"] or ("link" if tag == "a" else tag)
 
 
@@ -42,7 +49,8 @@ def _element(i: int, d: dict) -> Element:
     else:
         value = d["value"]
     text = " ".join(d["text"].split())[:80]
-    return Element(f"e{i}", role, d["aria"] or text or d["placeholder"] or d["name"], value)
+    name = d["aria"] or text or d["placeholder"] or d["name"] or d.get("title") or d.get("alt") or d.get("id") or ""
+    return Element(f"e{i}", role, name, value)
 
 
 class PlaywrightEnv:
@@ -59,8 +67,13 @@ class PlaywrightEnv:
 
     def observe(self) -> Page:
         loc = self.page.locator(SELECTOR)
+        try:
+            found = loc.evaluate_all(_JS)
+        except Exception:  # navigation destroyed the execution context mid-read: wait once and retry
+            self.page.wait_for_load_state("domcontentloaded", timeout=10_000)
+            found = loc.evaluate_all(_JS)
         elements, self._handles = [], {}
-        for i, d in enumerate(loc.evaluate_all(_JS)):
+        for i, d in enumerate(found):
             if not d["visible"]:
                 continue
             if len(elements) == MAX_ELEMENTS:
@@ -85,7 +98,7 @@ class PlaywrightEnv:
             case "scroll":
                 self.page.mouse.wheel(0, 600)
             case "back":
-                self.page.go_back()
+                self.page.go_back(timeout=TIMEOUT_MS)
         try:
             self.page.wait_for_load_state("domcontentloaded", timeout=10_000)
         except self._timeout:

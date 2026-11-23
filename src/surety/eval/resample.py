@@ -106,7 +106,7 @@ def adaptive_draws(rows: list[dict], eps: float, audit_rates=(0.05, 0.2), gamma:
     cal = _split(rows, probs, "cal")
     body = []
     for r in audit_rates:
-        err, tail, auto, over = [], [], [], []
+        err, tail, auto = [], [], []
         for seed in range(n_seeds):
             order = _stream_order(rows, seed)
             p, g = [probs[i] for i in order], [rows[i]["gold_id"] for i in order]

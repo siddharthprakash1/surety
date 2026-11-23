@@ -13,6 +13,7 @@ from surety.gate import (
     RiskConformal,
     SplitConformal,
 )
+from surety.gate.policies import _lac_set
 
 TWO = {"a": 0.9, "b": 0.1}
 SURE = {"a": 0.9, "b": 0.05, "c": 0.05}
@@ -118,6 +119,8 @@ def test_adaptive_quantile_uses_kth_rule_at_alpha():
     assert aci._q() == split.q == pytest.approx(0.8)
     aci.alpha_raw = 0.3
     assert aci._q() == pytest.approx(0.7)
+    aci.alpha_raw = 0.15  # k = ceil(11 * 0.85) = 10th score; the old level-(1-α) "higher" rule gives 0.8 (agrees at 0.2, 0.3)
+    assert aci._q() == pytest.approx(0.9)
 
 
 def test_conformal_single_option_acts(data):
@@ -240,12 +243,21 @@ def test_adaptive_risk_weight_zero_only_drifts(data):
     assert g.alpha == pytest.approx(0.1 + 0.02 * 0.1)
 
 
-def test_adaptive_risk_alpha_floor_full_crc_set_escalates_with_lac_set(data):
+def test_adaptive_risk_alpha_floor_one_element_lac_set_escalates_full_view(data):
     g = AdaptiveRisk(0.1)
     g.fit(*data[0])
     g.update(SURE, "b", weight=100)
     assert g.alpha == 0.001 and g.prediction_set(SURE) == ["a", "b", "c"]
-    assert view(g.decide(SURE)) == ("escalate", None, ["a"])
+    assert _lac_set(SURE, g.lac_q) == ["a"]
+    d = g.decide(SURE)
+    assert (view(d), d.reason) == (("escalate", None, []), "full_view")
+
+
+def test_risk_escalates_with_lac_set_of_two_or_more():
+    g = RiskConformal(0.1)
+    g.lac_q, g.q = 0.75, 0.0
+    d = g.decide({"a": 0.5, "b": 0.3, "c": 0.2})
+    assert (view(d), d.reason) == (("escalate", None, ["a", "b"]), "set")
 
 
 def test_adaptive_risk_q_lookup_matches_risk_conformal_at_eps(data):
@@ -298,5 +310,7 @@ def test_risk_conformal_escalates_with_lac_set(data):
     risk.fit(cal_p, cal_g)
     lac.fit(cal_p, cal_g)
     esc = [(p, d) for p in test_p if (d := risk.decide(p)).action == "escalate"]
-    assert esc and all(d.candidate_set == lac.prediction_set(p) for p, d in esc)
+    # the LAC set when it has ≥ 2 options, else the full list ([])
+    expect = lambda p: c if len(c := lac.prediction_set(p)) >= 2 else []  # noqa: E731
+    assert esc and all(d.candidate_set == expect(p) for p, d in esc)
     assert any(d.candidate_set != risk.prediction_set(p) for p, d in esc)

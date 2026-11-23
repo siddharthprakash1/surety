@@ -52,8 +52,8 @@ class Supervisor:
     json_schema; OpenAI, vLLM, Ollama, OpenRouter accept it); free-text parsing remains the fallback."""
 
     def __init__(self, base_url: str, model: str, timeout: float = 300.0,
-                 max_tokens: int = 64, temperature: float = 0.0, reasoning: str | None = None,
-                 api_key: str | None = None, json_mode: bool = False):
+                 max_tokens: int = 64, temperature: float | None = 0.0, reasoning: str | None = None,
+                 api_key: str | None = None, json_mode: bool = False, token_param: str = "max_tokens"):
         self.base_url = base_url.rstrip("/")
         self.model = model
         self.timeout = timeout
@@ -62,16 +62,14 @@ class Supervisor:
         self.reasoning = reasoning
         self.headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
         self.json_mode = json_mode
+        self.token_param = token_param  # max_completion_tokens for OpenAI reasoning models (which also reject temperature)
 
     def _complete(self, messages: list[dict], schema: dict | None = None) -> tuple[str, Usage]:
         if self.reasoning:
             messages = [{**messages[0], "content": f"Reasoning: {self.reasoning}\n{messages[0]['content']}"}, *messages[1:]]
-        payload = {
-            "model": self.model,
-            "messages": messages,
-            "max_tokens": self.max_tokens,
-            "temperature": self.temperature,
-        }
+        payload = {"model": self.model, "messages": messages, self.token_param: self.max_tokens}
+        if self.temperature is not None:
+            payload["temperature"] = self.temperature
         if schema:
             payload["response_format"] = {"type": "json_schema", "json_schema": schema}
         t0 = time.perf_counter()
@@ -100,7 +98,8 @@ class Supervisor:
             usage.abstained = got == "NONE"
             return (got if got in allowed else None), usage
         chosen = _parse(text, allowed, last=usage.fallback_parsed)
-        usage.abstained = chosen is None and _is_none(text)
+        # a NONE in recovered reasoning text is not an answer
+        usage.abstained = chosen is None and not usage.fallback_parsed and _is_none(text)
         return chosen, usage
 
     def slot_value(self, state: DecisionState, element_id: str) -> tuple[str | None, Usage]:

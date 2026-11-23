@@ -34,29 +34,40 @@ _STEMS = {
     "credentials": [
         r"password",
         r"passcode",
-        r"card[\s-]+(?:number|no)\b",
+        r"card[\s-]*(?:number\b|no\b|#)",
+        r"cc[\s-]*(?:num\w*|exp\w*|csc|cvv|cvc)\b",
         r"cv[vc]\d?\b",
+        r"csc\b",
         r"security[\s-]+code",
-        r"pin\b",
+        r"valid[\s-]+(?:thru|through|until)\b",
+        r"pin\b(?![\s/,-]*(?:code|zip))",  # not "PIN code", "PIN / ZIP code" (Indian postcode) ...
+        r"(?:card|atm|security|secret|\d[\s-]?digit)[\s-]+pin\b",  # ... unless it is a card/ATM PIN
         r"social[\s-]+security",
         r"ssn\b",
         r"one[\s-]time[\s-]+(?:code|password)",
-        r"verification[\s-]+code",
+        r"verification[\s-]+(?:code|value)",
         r"otp\b",
-        r"expir\w*",
+        r"exp(?:iry|iration)\b",  # not "expired", "expires"
+        r"exp\.?[\s-]*(?:date|month|year|mm|yy)\b",
+        r"(?<!d/)(?<!d /)(?<!d/ )(?<!d / )mm\s*/\s*yy\b",  # card MM/YY; not DD/MM/YY(YY) nor a "Start date (MM/YYYY)"
     ],
 }
 _RULES = {cat: re.compile(rf"\b(?:{'|'.join(stems)})", re.IGNORECASE) for cat, stems in _STEMS.items()}
 
 
+def _words(text: str) -> str:
+    """DOM names as words: card_number, creditCardNumber -> card number, credit Card Number."""
+    return re.sub(r"(?<=[a-z])(?=[A-Z])", " ", text.replace("_", " "))
+
+
 class CriticalDetector:
     def classify(self, label: str, url: str = "") -> str | None:
-        text = f"{label} {url}"
+        text = _words(f"{label} {url}")
         return next((cat for cat, rule in _RULES.items() if rule.search(text)), None)
 
     def credential(self, label: str) -> bool:
         """Independent of category order: 'Enter your password to delete your account' classifies as destructive."""
-        return bool(_RULES["credentials"].search(label))
+        return bool(_RULES["credentials"].search(_words(label)))
 
 
 class CriticalOverride:
@@ -85,5 +96,6 @@ class CriticalOverride:
         if cat == "payment":
             return GateDecision("escalate", None, [d.option_id], "stop:payment")
         if cat:
-            return GateDecision("escalate", None, [d.option_id], f"critical:{cat}")
+            # the full list, not a confirm prompt: the answer is also the gate's update label
+            return GateDecision("escalate", None, [], f"critical:{cat}")
         return d

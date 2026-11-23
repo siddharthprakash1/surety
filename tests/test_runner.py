@@ -1,4 +1,5 @@
 import json
+import random
 
 import pytest
 
@@ -8,6 +9,7 @@ from surety.gate import CriticalDetector, CriticalOverride, FixedThreshold
 from surety.loop import run
 from surety.loop.runner import _bare
 from surety.supervise import MockSupervisor
+from surety.supervise.client import Usage
 from surety.trace import Trace
 from surety.types import GateDecision
 
@@ -36,6 +38,9 @@ class SubsetPolicy:
 
     def decide(self, probs):
         return GateDecision("escalate", None, ["e1", "e2"], "set")
+
+    def update(self, probs, gold, weight=1.0):
+        pass
 
 
 def _page(*els, text="", url="http://x.test"):
@@ -135,6 +140,127 @@ def test_credential_entry_stops_without_typing(executor, el):
     assert ep.steps[0]["critical"] == "stop:credentials" and sup.calls == 1
 
 
+def test_credential_field_labelled_with_another_category_still_stops():
+    el = Element("e2", "input", "Enter your password to delete your account")
+    env = FakeEnv([_page(BUTTON, el)])
+    ep = run("go", env, MockBackend(uniform), FixedThreshold(0.5), MockSupervisor("e2", slots={"e2": "hunter2"}))
+    assert ep.stop_reason == "stop:credentials" and env.actions == []
+
+
+@pytest.mark.parametrize("value,stop,critical", [("Buy selected", "stop:payment", "stop:payment"),
+                                                  ("Delete selected", None, "critical:destructive")])
+def test_select_value_is_classified(value, stop, critical):
+    env = FakeEnv([_page(BUTTON, Element("e2", "select", "Bulk actions"))])
+    ep = run("go", env, MockBackend(uniform), FixedThreshold(0.5), MockSupervisor("e2", slots={"e2": value}),
+             max_steps=1)
+    assert ep.steps[0]["critical"] == critical
+    assert env.actions == ([] if stop else [Action("select", "e2", value)])
+    assert ep.stop_reason == (stop or "max_steps")
+
+
+def test_executor_stop_is_recorded_as_critical():
+    env = FakeEnv([_page(Element("e1", "button", "Place order"))])
+    ep = run("buy", env, always("e1"), FixedThreshold(0.5), MockSupervisor("e1"))
+    assert ep.steps[0]["critical"] == "stop:payment" and ep.steps[0]["chosen"] is None
+
+
+class Recorder:
+    name = "rec"
+
+    def __init__(self, inner):
+        self.inner, self.updates = inner, []
+
+    def decide(self, probs):
+        return self.inner.decide(probs)
+
+    def update(self, probs, gold, weight=1.0):
+        self.updates.append((gold, weight))
+
+
+def test_calibrate_runs_before_the_gate_and_raw_probs_are_traced():
+    flat = lambda p: {k: 1 / len(p) for k in p}  # noqa: E731
+    env = FakeEnv([_page(BUTTON, LINK)])
+    ep = run("go", env, always("e1"), FixedThreshold(0.5), MockSupervisor("e2"), max_steps=1, calibrate=flat)
+    assert ep.steps[0]["decision"] == "escalate" and env.actions == [Action("click", "e2")]
+    assert max(ep.steps[0]["probs_raw"].values()) == 0.9 and max(ep.steps[0]["probs"].values()) < 0.5
+
+
+def test_escalation_updates_with_supervisor_label_weight_one():
+    gate = Recorder(FixedThreshold(0.5))
+    run("go", FakeEnv([_page(BUTTON, LINK)]), MockBackend(uniform), gate, MockSupervisor("e2"), max_steps=1)
+    assert gate.updates == [("e2", 1.0)]
+
+
+def test_unparsed_supervisor_answer_updates_with_weight_zero():
+    gate = Recorder(FixedThreshold(0.5))
+    run("go", FakeEnv([_page(BUTTON, LINK)]), MockBackend(uniform), gate, MockSupervisor(None), max_steps=1)
+    assert [w for _, w in gate.updates] == [0.0]
+
+
+def test_unaudited_acted_step_updates_with_weight_zero_and_no_supervisor_call():
+    gate = Recorder(FixedThreshold(0.5))
+    sup = MockSupervisor("e2")
+    run("go", FakeEnv([_page(BUTTON, LINK)]), always("e1"), gate, sup, max_steps=1)
+    assert gate.updates == [("e1", 0.0)] and sup.calls == 0
+
+
+def test_audit_asks_full_view_acts_on_label_and_weights_one_over_r():
+    gate = Recorder(FixedThreshold(0.5))
+    env, sup = FakeEnv([_page(BUTTON, LINK)]), MockSupervisor("e2")
+    ep = run("go", env, always("e1"), gate, sup, max_steps=1, audit_rate=0.5, rng=random.Random(3))  # 0.238 < 0.5
+    assert sup.candidates == [None] and ep.steps[0]["audit"] == "e2"
+    assert gate.updates == [("e2", 2.0)] and env.actions == [Action("click", "e2")]
+
+
+class Abstains(MockSupervisor):
+    def choose(self, state, candidate_ids=None):
+        self.calls += 1
+        self.candidates.append(candidate_ids)
+        return None, Usage(0, 0, 0.0, abstained=True)
+
+
+def test_audit_answered_none_is_a_label_and_is_acted_on():
+    gate = Recorder(FixedThreshold(0.5))
+    env = FakeEnv([_page(BUTTON, LINK)])
+    ep = run("go", env, always("e1"), gate, Abstains(None), max_steps=1, audit_rate=0.5, rng=random.Random(3))
+    assert gate.updates == [("none_of_these", 2.0)] and env.actions == [Action("scroll")]
+    assert ep.steps[0]["audit"] == "none_of_these"
+
+
+def test_shadow_label_is_recorded_but_not_acted_on_learnt_or_billed():
+    gate = Recorder(FixedThreshold(0.5))
+    env, sup = FakeEnv([_page(BUTTON, LINK)]), MockSupervisor("e2")
+    ep = run("go", env, always("e1"), gate, sup, max_steps=1, shadow_rate=0.5, shadow_rng=random.Random(3))
+    assert ep.steps[0]["shadow"] == "e2" and env.actions == [Action("click", "e1")]
+    assert gate.updates == [("e1", 0.0)] and (ep.supervisor_calls, ep.shadow_calls) == (0, 1)
+
+
+def test_shadows_do_not_move_audits():
+    def audits(shadow_rate):
+        pages = [_page(Element(f"e{i}", "button", f"B{i}"), LINK) for i in range(1, 9)]
+        ep = run("go", FakeEnv(pages), MockBackend(confident(lambda s: s.options[0].id)), FixedThreshold(0.5),
+                 MockSupervisor("e2"), max_steps=8, audit_rate=0.5, rng=random.Random(5), shadow_rate=shadow_rate,
+                 shadow_rng=random.Random(9))
+        return [i for i, s in enumerate(ep.steps) if "audit" in s]
+
+    assert audits(0.0) == audits(1.0) and audits(0.0)
+
+
+def test_orderings_follow_the_collection_rule():
+    seen = []
+
+    class Counting(MockBackend):
+        def choice(self, state, n_perm=1, seed=0):
+            seen.append((len(state.options), n_perm))
+            return super().choice(state, n_perm, seed)
+
+    many = [Element(f"e{i}", "button", f"B{i}") for i in range(20)]
+    for page in ([BUTTON], many):
+        run("go", FakeEnv([_page(*page)]), Counting(uniform), FixedThreshold(0.5), MockSupervisor(None), max_steps=1,
+            n_perm=5, n_perm_large=3)
+    assert seen == [(2, 5), (21, 3)]
+
+
 def test_typing_uses_slot_value():
     env = FakeEnv([_page(SEARCH)])
     sup = MockSupervisor(None, slots={"e1": "shoes"})
@@ -168,6 +294,17 @@ def test_supervisor_gets_exact_candidate_subset():
     run("go", FakeEnv([_page(BUTTON, LINK, Element("e3", "link", "About"))]), MockBackend(), SubsetPolicy(), sup,
         max_steps=1)
     assert sup.candidates == [["e1", "e2"]]
+
+
+def test_supervisor_candidates_in_page_order():
+    class Reversed(SubsetPolicy):
+        def decide(self, probs):
+            return GateDecision("escalate", None, ["e3", "e1"], "set")
+
+    sup = MockSupervisor("e1")
+    run("go", FakeEnv([_page(BUTTON, LINK, Element("e3", "link", "About"))]), MockBackend(), Reversed(), sup,
+        max_steps=1)
+    assert sup.candidates == [["e1", "e3"]]
 
 
 def test_subset_none_reasks_full_view_then_scrolls():

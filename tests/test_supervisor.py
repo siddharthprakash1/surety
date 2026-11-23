@@ -90,6 +90,13 @@ def test_fallback_takes_last_id_and_skips_truncated(httpx_mock):
     assert chosen is None and not usage.fallback_parsed and not usage.abstained
 
 
+def test_none_in_recovered_reasoning_is_not_abstention(httpx_mock):
+    body = {"choices": [{"message": {"content": "", "reasoning": "reply with exactly its id, not NONE."}}]}
+    httpx_mock.add_response(url="http://sup/v1/chat/completions", json=body)
+    chosen, usage = _sup().choose(_state())
+    assert chosen is None and usage.fallback_parsed and not usage.abstained
+
+
 def test_explicit_none_is_abstention(httpx_mock):
     _reply(httpx_mock, "NONE")
     chosen, usage = _sup().choose(_state())
@@ -109,6 +116,43 @@ def test_slot_value_prompt_and_strip(httpx_mock):
 def test_slot_value_empty_is_none(httpx_mock):
     _reply(httpx_mock, "")
     assert _sup().slot_value(_state(), "a1")[0] is None
+
+
+def test_json_mode_sends_schema_and_key(httpx_mock):
+    _reply(httpx_mock, '{"id": "c3"}')
+    chosen, usage = Supervisor("http://sup", "m", api_key="k", json_mode=True).choose(_state(), ["c3", "a1"])
+    req = httpx_mock.get_request()
+    fmt = json.loads(req.content)["response_format"]
+    assert req.headers["Authorization"] == "Bearer k" and fmt["type"] == "json_schema"
+    assert fmt["json_schema"]["schema"]["properties"]["id"]["enum"] == ["c3", "a1", "NONE"]
+    assert chosen == "c3" and not usage.abstained
+
+
+def test_json_mode_none_abstains_and_disallowed_id_is_unparsed(httpx_mock):
+    sup = Supervisor("http://sup", "m", json_mode=True)
+    _reply(httpx_mock, '{"id": "NONE"}')
+    assert (lambda c, u: (c, u.abstained))(*sup.choose(_state())) == (None, True)
+    _reply(httpx_mock, '{"id": "b2"}')
+    assert (lambda c, u: (c, u.abstained))(*sup.choose(_state(), ["a1"])) == (None, False)
+
+
+def test_json_mode_falls_back_to_text_parse(httpx_mock):
+    _reply(httpx_mock, "I pick b2")
+    assert Supervisor("http://sup", "m", json_mode=True).choose(_state())[0] == "b2"
+
+
+def test_reasoning_model_payload_omits_temperature(httpx_mock):
+    _reply(httpx_mock, "a1")
+    Supervisor("http://sup", "m", max_tokens=99, temperature=None, token_param="max_completion_tokens").choose(_state())
+    req = json.loads(httpx_mock.get_request().content)
+    assert req["max_completion_tokens"] == 99 and "max_tokens" not in req and "temperature" not in req
+
+
+def test_default_sends_no_response_format_or_key(httpx_mock):
+    _reply(httpx_mock, "a1")
+    _sup().choose(_state())
+    req = httpx_mock.get_request()
+    assert "response_format" not in json.loads(req.content) and "Authorization" not in req.headers
 
 
 def test_slot_value_never_from_reasoning(httpx_mock):

@@ -10,15 +10,14 @@ from surety.gate import (
     FixedThreshold,
     GatePolicy,
     Margin,
-    PerChoiceThreshold,
     RiskConformal,
     SplitConformal,
 )
 
 # H4 systems (spec): supervisor-only, executor-only, fixed threshold, Jev-Mobile rule, risk, adaptive risk
-POLICIES = {"fixed": FixedThreshold, "margin": Margin, "fitted": FittedThreshold, "per_choice": PerChoiceThreshold,
+POLICIES = {"fixed": FixedThreshold, "margin": Margin, "fitted": FittedThreshold,
             "conformal": SplitConformal, "aci": AdaptiveConformal, "risk": RiskConformal, "arisk": AdaptiveRisk}
-FITTED = {"fitted", "per_choice", "conformal", "aci", "risk", "arisk"}
+FITTED = {"fitted", "conformal", "aci", "risk", "arisk"}
 
 
 def fit_gate(spec: str, rows: list[dict] | None = None, gamma: float = 0.02) -> tuple[GatePolicy, TemperatureScaler | None]:
@@ -27,6 +26,10 @@ def fit_gate(spec: str, rows: list[dict] | None = None, gamma: float = 0.02) -> 
         return {"supervisor": FixedThreshold(math.inf), "executor": FixedThreshold(0.0),
                 "escalate_on_none": EscalateOnNone()}[spec], None
     kind, value = spec.split(":")
+    if kind == "per_choice":
+        raise ValueError("per_choice thresholds are keyed by WebJev option ids, which live pages never use")
+    if not 0 < float(value) < 1:
+        raise ValueError(f"{spec}: the value is a probability in (0, 1)")
     policy = POLICIES[kind](float(value), gamma) if kind in ("aci", "arisk") else POLICIES[kind](float(value))
     cal = [r for r in rows or [] if r["split"] == "cal"]
     if kind in FITTED and not cal:

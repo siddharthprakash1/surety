@@ -22,12 +22,16 @@ class Episode:
     stop_reason: str
     supervisor_calls: int
     executor_calls: int
+    shadow_calls: int = 0  # evaluation-only labels (shadow_rate): not part of the system's cost
 
 
 def _call(fn, state: DecisionState, ep: Episode, row: dict, arg):
     value, usage = fn(state, arg)
     ep.supervisor_calls += 1
-    row["supervisor"].append({"call": fn.__name__, **asdict(usage)})
+    # an explicit NONE is an answer (no option fits), not a parse failure
+    if value is None and getattr(usage, "abstained", False):
+        value = NONE_OF_THESE
+    row["supervisor"].append({"call": fn.__name__, **asdict(usage), "answered": value is not None})
     return value
 
 
@@ -44,15 +48,23 @@ def _bare(url: str) -> str:
 
 
 def run(task: str, env: Env, backend: Backend, policy: GatePolicy, supervisor, trace: Trace | None = None,
-        max_steps: int = 30, n_perm: int = 1, calibrate=None, audit_rate: float = 0.0, seed: int = 0) -> Episode:
+        max_steps: int = 30, n_perm: int = 1, calibrate=None, audit_rate: float = 0.0,
+        rng: random.Random | None = None, n_perm_large: int | None = None, large_options: int = 16,
+        shadow_rate: float = 0.0, shadow_rng: random.Random | None = None) -> Episode:
     """calibrate: probs -> probs applied before the gate (the offline temperature). Online gate updates as offline
     (analyze._stream): escalated steps carry the supervisor's answer as the label (w=1); acted steps are audited with
-    probability audit_rate (w=1/r; the audit answer is acted on); other steps update with w=0 (ε drift only)."""
+    probability audit_rate (w=1/r; the audit answer is acted on); other steps update with w=0 (ε drift only).
+    rng draws the audits: pass one Random per stream so audit positions differ across episodes.
+    n_perm_large: orderings above large_options options, as the collection the gate was fitted on (5, 3 above 16).
+    shadow_rate: evaluation only — an acted, unaudited step asks the supervisor (full list) with this probability and
+    records the answer as row["shadow"]; nothing is acted on or learnt from it, and it is counted in shadow_calls.
+    shadow_rng draws the shadows apart from the audits, so turning shadows on leaves a run's audits unchanged."""
     ep = Episode(task, [], "max_steps", 0, 0)
     if not isinstance(policy, CriticalOverride):
         policy = CriticalOverride(policy, _DETECTOR)
     detector = policy.detector
-    rng = random.Random(seed)
+    rng = rng if rng is not None else random.Random()
+    shadow_rng = shadow_rng if shadow_rng is not None else random.Random()
     history: list[str] = []
     last, streak, nones = None, 0, 0
     for i in range(max_steps):
@@ -61,7 +73,10 @@ def run(task: str, env: Env, backend: Backend, policy: GatePolicy, supervisor, t
         labels = {o.id: o.label for o in state.options}
         roles = {e.id: e.role for e in page.elements}
         policy.set_labels(labels)
-        answer = backend.choice(state, n_perm)
+        # count page options as WebJev rows count theirs: without the added none_of_these
+        n_opts = sum(o.id != NONE_OF_THESE for o in state.options)
+        k = n_perm_large if n_perm_large is not None and n_opts > large_options else n_perm
+        answer = backend.choice(state, k)
         ep.executor_calls += 1
         probs = calibrate(answer.probs) if calibrate else answer.probs
         d = policy.decide(probs)
@@ -89,6 +104,10 @@ def run(task: str, env: Env, backend: Backend, policy: GatePolicy, supervisor, t
                 audited = row["audit"] = ask(None)
                 if audited in labels:
                     chosen, weight = audited, 1 / audit_rate
+            elif shadow_rate and shadow_rng.random() < shadow_rate:
+                label, usage = supervisor.choose(state, None)
+                ep.shadow_calls += 1
+                row["shadow"] = NONE_OF_THESE if label is None and getattr(usage, "abstained", False) else label
         gold = chosen if chosen in labels else None
         policy.update(probs, gold or d.option_id or "", weight if gold else 0.0)
         if not stop:
