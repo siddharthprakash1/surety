@@ -1,5 +1,7 @@
 # HANDOVER — Surety (read this first)
 
+**Update 2026-11-24:** read `docs/handover/2026-11-24-restore-and-research.md` first: the branch was lost on 2026-11-16 and rebuilt; new gates on a learned error score; research and a ranked roadmap in `docs/research/2026-11-24-improvements.md`; an independent review's fixes.
+
 **Update 2026-11-16:** an overnight session on the owner's Windows laptop continued from here on branch `overnight-2026-11-16`. Read `docs/handover/2026-11-16-overnight.md` first: §5 step 1 (re-review of the fix wave) is done and its findings fixed; new uncertainty, ε-sweep, H3 and WebGuard results; live-harness and Modal groundwork; what needs the owner (Modal account, hosted supervisor key, push). The rest of this file is the original M1 handover.
 
 Written 2026-11-15 by the Claude Code session that built M1. You are the next agent/operator. Everything below is what you need to continue without the original conversation.
