@@ -1,6 +1,6 @@
 # M1 analysis: kev_compact
 
-- collection: `runs/kev_compact.jsonl`
+- collection: `artifacts/m1/kev_compact.jsonl`
 - rows: cal 600, test_in 400, test_shift 600
 - backend: kev
 - mode: compact
@@ -98,6 +98,7 @@
 | set | 95 | 0.189 | 0.063 | 0.579 | 0.116 | 0.529 | 0.228 | 1371 | 238 | 8049 |
 
 gold_in_set (LAC coverage on the H3 sample): 0.832; paired n=95; action_prediction n=45, element_grounding n=50
+both answered n=26: acc full 0.654 / set 0.500; discordant full-only 5 / set-only 1; exact McNemar p=0.219
 
 
-![risk-coverage](kev_compact_final.png)
+![risk-coverage](kev_compact.png)
