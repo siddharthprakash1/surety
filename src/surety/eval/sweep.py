@@ -12,15 +12,17 @@ POLICIES = (FittedThreshold, PerChoiceThreshold, RiskConformal)
 GRID = tuple(round(x, 2) for x in np.arange(0.02, 0.201, 0.02))
 
 
-def eps_sweep(rows: list[dict], eps_grid=GRID, n_seeds: int = 100, split: str = "test_shift") -> list[dict]:
+def eps_sweep(rows: list[dict], eps_grid=GRID, n_seeds: int = 100, split: str = "test_shift",
+              policies=POLICIES) -> list[dict]:
+    """policies: callables eps -> gate (classes, or factories such as lambda eps: LearnedRisk(eps, delta=0.1))."""
     out = []
     for seed in range(n_seeds):
         rs = resplit(rows, seed)
         probs = variants(rs)["debiased+T"]
         cal, (p, g) = _split(rs, probs, "cal"), _split(rs, probs, split)
         for eps in eps_grid:
-            for cls in POLICIES:
-                policy = cls(eps)
+            for make in policies:
+                policy = make(eps)
                 policy.fit(*cal)
                 sets = _sets(policy, p)
                 out.append({"seed": seed, "eps": eps, "policy": policy.name.split("@")[0],
@@ -44,14 +46,18 @@ def sweep_table(records: list[dict]) -> str:
     return _table(("eps", "policy", "auto_err", "auto_err_2.5–97.5%", "P(auto_err>eps)", "automation"), body)
 
 
-def sweep_plot(records: list[dict], out_png: Path, title: str = "held-out sites (test_shift)") -> None:
+COLORS = {"fitted": "#eb6834", "per_choice": "#8a63d2", "risk": "#2a78d6"}
+
+
+def sweep_plot(records: list[dict], out_png: Path, title: str = "held-out sites (test_shift)",
+               colors: dict[str, str] | None = None, direct_labels: bool = False) -> None:
+    """colors: policy -> hex, in legend order. direct_labels: name each automation line at its right end (text ink)."""
     from matplotlib.figure import Figure
 
     s = _summary(records)
     fig = Figure(figsize=(9, 3.6))
     ax_err, ax_auto = fig.subplots(1, 2)
-    colors = {"fitted": "#eb6834", "per_choice": "#8a63d2", "risk": "#2a78d6"}
-    for pol, color in colors.items():
+    for pol, color in (colors or COLORS).items():
         eps = sorted(e for p, e in s if p == pol)
         if not eps:
             continue
@@ -59,6 +65,9 @@ def sweep_plot(records: list[dict], out_png: Path, title: str = "held-out sites 
         ax_err.plot(eps, get("err"), color=color, lw=2, label=pol)
         ax_err.fill_between(eps, get("lo"), get("hi"), color=color, alpha=0.15, lw=0)
         ax_auto.plot(eps, get("auto"), color=color, lw=2, label=pol)
+        if direct_labels:
+            ax_auto.annotate(pol, (eps[-1], get("auto")[-1]), xytext=(4, 0), textcoords="offset points",
+                             va="center", fontsize=8, color="#52514e", annotation_clip=False)
     top = max(max(e for _, e in s), max(v["hi"] for v in s.values()))
     ax_err.plot([0, top], [0, top], color="#888", lw=1, ls="--", label="target ε")
     ax_err.set(xlabel="target ε", ylabel="autonomous error rate", title=f"Realized error, {title}")

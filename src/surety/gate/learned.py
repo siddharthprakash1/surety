@@ -166,22 +166,44 @@ class LearnedRisk(SplitConformal):
 
 
 class AdaptiveLearnedRisk(_OnlineAlpha, LearnedRisk):
-    """LearnedRisk with its level α updated online from weighted feedback, as AdaptiveRisk (ACI on the CRC level)."""
+    """LearnedRisk with its CRC level α updated online from weighted feedback (ACI, as AdaptiveRisk), plus:
 
-    def __init__(self, eps: float, gamma: float = 0.02, alpha_min: float = 0.001, alpha_max: float = 0.5, **kw):
+    - feedback="dr": an acted step's loss estimate is ê + w·(ℓ − ê), with ê the model's predicted error: an unaudited
+      step (w = 0) counts ê instead of 0, an audited one (w = 1/r) corrects it. Unbiased for audits at a known rate, as
+      the plain estimate w·ℓ ("ipw"), with lower variance when ê tracks the error; escalated steps have loss 0.
+    - margin κ: the online target is (1 − κ)·ε, a buffer for finite streams (ACI controls the long-run average only).
+    gamma 0.005, κ 0.2 and "dr" were chosen on M1's held-out streams (results/m1/kev_compact_learned.md).
+    """
+
+    def __init__(self, eps: float, gamma: float = 0.005, alpha_min: float = 0.001, alpha_max: float = 0.5,
+                 margin: float = 0.2, feedback: str = "dr", **kw):
         super().__init__(eps, **kw)
+        if feedback not in ("dr", "ipw") or not 0 <= margin < 1:
+            raise ValueError(f"feedback {feedback!r} (dr|ipw), margin {margin} (in [0, 1))")
         self.name = f"alearned@{eps}"
         self.gamma, self.alpha_min, self.alpha_max = gamma, alpha_min, alpha_max
-        self.alpha_raw = eps
+        self.margin, self.feedback = margin, feedback
+        self.target = (1 - margin) * eps
+        self.alpha_raw = self.target
         self._cache: tuple[float, float] | None = None
 
     def _tau(self) -> float:
         if self.alpha <= self.alpha_min or not self.models:
             return -math.inf
         if self._cache is None or self._cache[0] != self.alpha:
-            self._cache = (self.alpha, crc_threshold(self.oof, self.wrong, self.alpha))
+            self._cache = (self.alpha, self._threshold(self.alpha))
         return self._cache[1]
 
-    def update(self, probs: dict[str, float], gold: str, weight: float = 1.0) -> None:
+    def loss_estimate(self, probs: dict[str, float], gold: str, weight: float) -> float:
         c = self.prediction_set(probs)
-        self._aci_step(float(len(c) == 1 and gold not in c), weight)
+        if len(c) != 1:
+            return 0.0
+        loss = float(gold not in c)
+        if self.feedback == "ipw":
+            return weight * loss
+        e = self.score(probs)
+        return e + weight * (loss - e)
+
+    def update(self, probs: dict[str, float], gold: str, weight: float = 1.0) -> None:
+        est = self.loss_estimate(probs, gold, weight)
+        self.alpha_raw = min(self.alpha_raw + self.gamma * (self.target - est), self.alpha_max)

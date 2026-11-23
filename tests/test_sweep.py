@@ -23,3 +23,12 @@ def test_sweep_records_table_and_plot(tmp_path):
     assert table.splitlines()[2].startswith("| 0.05 | fitted |") and len(table.splitlines()) == 2 + 6
     sweep_plot(recs, tmp_path / "s.png")
     assert (tmp_path / "s.png").stat().st_size > 0
+
+
+def test_sweep_takes_gate_factories_and_names_lines(tmp_path):
+    from surety.eval.learned import STATIC, SWEEP_COLORS
+
+    recs = eps_sweep(_rows(), eps_grid=(0.1, 0.2), n_seeds=2, policies=STATIC)
+    assert {r["policy"] for r in recs} == {"risk", "learned", "learned_pac"} and len(recs) == 2 * 2 * 3
+    sweep_plot(recs, tmp_path / "l.png", colors=SWEEP_COLORS, direct_labels=True)
+    assert (tmp_path / "l.png").stat().st_size > 0

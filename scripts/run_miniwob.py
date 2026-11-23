@@ -28,7 +28,7 @@ def main() -> int:
     ap.add_argument("--n-perm", type=int, help="orderings per step; default 5 (3 above 16 options) with --fit, as fitted, else 1")
     ap.add_argument("--policy", default="fixed:0.7",
                     help="supervisor | executor | escalate_on_none | fixed:<tau> | margin:<d> | "
-                         "fitted|conformal|aci|risk|arisk:<eps>")
+                         "fitted|conformal|aci|risk|arisk|learned|learned_pac|alearned:<eps>")
     ap.add_argument("--fit", type=Path, help="offline collection whose cal rows fit T and the gate (e.g. "
                                              "artifacts/m1/kev_compact.jsonl)")
     ap.add_argument("--audit-rate", type=float, default=0.0)

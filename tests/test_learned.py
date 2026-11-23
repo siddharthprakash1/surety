@@ -131,16 +131,41 @@ def test_one_class_calibration_escalates_everything():
 
 def test_adaptive_learned_moves_with_feedback(data):
     (cal_p, cal_g), (test_p, test_g) = data
-    g = AdaptiveLearnedRisk(0.1, gamma=0.05)
+    g = AdaptiveLearnedRisk(0.1, gamma=0.05, margin=0.0, feedback="ipw")
     g.fit(cal_p, cal_g)
-    assert g._tau() == crc_threshold(g.oof, g.wrong, 0.1)
+    assert g.target == 0.1 and g._tau() == crc_threshold(g.oof, g.wrong, 0.1)
     acted = next(p for p in test_p if len(g.prediction_set(p)) == 1)
     wrong_gold = min(acted, key=acted.get)
-    before = g.alpha
+    before = g.alpha_raw
     g.update(acted, wrong_gold, weight=5.0)  # an audited error
-    assert g.alpha < before and g._tau() <= crc_threshold(g.oof, g.wrong, before)
+    assert g.alpha_raw == pytest.approx(before + 0.05 * (0.1 - 5.0))
+    assert g.alpha == g.alpha_min and g._tau() == -math.inf  # below the floor: escalate everything
     for p in test_p[:200]:
-        g.update(p, "never", weight=0.0)  # unlabelled steps only drift α up
+        g.update(p, "never", weight=0.0)  # ipw: unlabelled steps only drift α up
     assert g.alpha == pytest.approx(g.alpha_max)
     g.alpha_raw = 0.0
     assert g._tau() == -math.inf and g.decide(acted).action == "escalate"
+
+
+def test_adaptive_learned_doubly_robust_estimate(data):
+    (cal_p, cal_g), (test_p, _) = data
+    g = AdaptiveLearnedRisk(0.1)  # defaults: dr, margin 0.2, gamma 0.005
+    g.fit(cal_p, cal_g)
+    assert g.target == pytest.approx(0.08) and g.alpha_raw == pytest.approx(0.08)
+    acted = next(p for p in test_p if len(g.prediction_set(p)) == 1)
+    top, e = max(acted, key=acted.get), g.score(acted)
+    assert g.loss_estimate(acted, "x", 0.0) == pytest.approx(e)  # unaudited: the model's error estimate
+    assert g.loss_estimate(acted, top, 5.0) == pytest.approx(e - 5 * e)  # audited, correct
+    assert g.loss_estimate(acted, "x", 5.0) == pytest.approx(e + 5 * (1 - e))  # audited, wrong
+    assert g.loss_estimate(acted, "x", 1.0) == 1.0  # fully labelled: the loss itself
+    escalated = next(p for p in test_p if len(g.prediction_set(p)) != 1)
+    assert g.loss_estimate(escalated, "x", 1.0) == 0.0
+    before = g.alpha_raw
+    g.update(acted, "x", 0.0)
+    assert g.alpha_raw == pytest.approx(before + 0.005 * (0.08 - e))
+
+
+@pytest.mark.parametrize("kw", [{"feedback": "aipw"}, {"margin": 1.0}, {"margin": -0.1}])
+def test_adaptive_learned_rejects_bad_options(kw):
+    with pytest.raises(ValueError):
+        AdaptiveLearnedRisk(0.1, **kw)

@@ -11,6 +11,9 @@ from surety.gate.learned import AdaptiveLearnedRisk, LearnedRisk, features
 from surety.gate.policies import _top
 
 STATIC = (RiskConformal, LearnedRisk, lambda eps: LearnedRisk(eps, delta=0.1))
+# risk keeps Figure 1's blue; aqua and yellow pass the CVD / normal-vision checks with it (all pairs, light surface)
+# and sit below 3:1 contrast, so the figure names each line directly
+SWEEP_COLORS = {"risk": "#2a78d6", "learned_pac": "#1baf7a", "learned": "#eda100"}
 TESTS = ("test_in", "test_shift")
 
 
@@ -57,23 +60,29 @@ def static_draws(rows: list[dict], eps_list=(0.05, 0.1), n_seeds: int = 200) -> 
                     policy.seed = seed
                 policy.fit(*cal)
                 for split in TESTS:
-                    p, g = _split(rs, probs, split)
-                    sets = _sets(policy, p)
-                    out.append({"seed": seed, "eps": eps, "policy": policy.name, "split": split,
-                                "auto_err": m.autonomous_error_rate(sets, g), "automation": m.automation_rate(sets)})
+                    idx = [i for i, r in enumerate(rs) if r["split"] == split]
+                    sets = _sets(policy, [probs[i] for i in idx])
+                    for task in ("all", "action_prediction", "element_grounding"):
+                        keep = [k for k, i in enumerate(idx) if task in ("all", rs[i]["task_type"])]
+                        s, g = [sets[k] for k in keep], [rs[idx[k]]["gold_id"] for k in keep]
+                        out.append({"seed": seed, "eps": eps, "policy": policy.name, "split": split, "task_type": task,
+                                    "auto_err": m.autonomous_error_rate(s, g), "automation": m.automation_rate(s)})
     return out
 
 
-def draws_table(records: list[dict]) -> str:
-    keys = list(dict.fromkeys((r["eps"], r["policy"], r["split"]) for r in records))
+def draws_table(records: list[dict], by_type: bool = False) -> str:
+    """All steps (by_type=False), or each task type on its own (the guarantees are marginal: no per-type control)."""
+    records = [r for r in records if (r.get("task_type", "all") != "all") == by_type]
+    keys = list(dict.fromkeys((r["eps"], r["policy"], r["split"], r.get("task_type", "all")) for r in records))
     body = []
-    for eps, policy, split in sorted(keys, key=lambda k: (k[0], k[2], keys.index(k))):
-        rs = [r for r in records if (r["eps"], r["policy"], r["split"]) == (eps, policy, split)]
+    for key in sorted(keys, key=lambda k: (k[0], k[2], k[3], keys.index(k))):
+        rs = [r for r in records if (r["eps"], r["policy"], r["split"], r.get("task_type", "all")) == key]
         err, auto = np.array([r["auto_err"] for r in rs]), np.array([r["automation"] for r in rs])
-        body.append([str(eps), split, policy, len(rs), float(err.mean()), _pct(err), float(np.mean(err > eps)),
-                     float(auto.mean()), _pct(auto)])
-    return _table(("eps", "split", "policy", "draws", "auto_err", "auto_err_2.5–97.5%", "P(auto_err>eps)",
-                   "automation", "automation_2.5–97.5%"), body)
+        eps, policy, split, task = key
+        body.append([str(eps), split, *([task] if by_type else []), policy, len(rs), float(err.mean()), _pct(err),
+                     float(np.mean(err > eps)), float(auto.mean()), _pct(auto)])
+    return _table(("eps", "split", *(["task_type"] if by_type else []), "policy", "draws", "auto_err",
+                   "auto_err_2.5–97.5%", "P(auto_err>eps)", "automation", "automation_2.5–97.5%"), body)
 
 
 def stream_draws(rows: list[dict], eps: float, makers: dict, audit_rate: float = 0.2, n_seeds: int = 200) -> str:
@@ -105,4 +114,12 @@ def stream_draws(rows: list[dict], eps: float, makers: dict, audit_rate: float =
                    "tail_auto_err", "automation", "automation_2.5–97.5%"), body)
 
 
-ADAPTIVE = {"arisk": lambda eps: AdaptiveRisk(eps), "alearned": lambda eps: AdaptiveLearnedRisk(eps)}
+# arisk as in M1; the same score with alearned's step size and margin (target 0.8·eps); plain ACI on the learned score;
+# then the defaults of AdaptiveLearnedRisk without and with the margin
+ADAPTIVE = {
+    "arisk (γ 0.02)": lambda eps: AdaptiveRisk(eps),
+    "arisk (γ 0.005, target 0.8·eps)": lambda eps: AdaptiveRisk(0.8 * eps, gamma=0.005),
+    "alearned (γ 0.02, κ 0, ipw)": lambda eps: AdaptiveLearnedRisk(eps, gamma=0.02, margin=0.0, feedback="ipw"),
+    "alearned (γ 0.005, κ 0, dr)": lambda eps: AdaptiveLearnedRisk(eps, margin=0.0),
+    "alearned (γ 0.005, κ 0.2, dr): default": lambda eps: AdaptiveLearnedRisk(eps),
+}

@@ -1,20 +1,26 @@
-"""Learned error score vs top probability: error ranking, 200 calibration draws, adaptive streams (CPU, ~5 min)."""
+"""Learned error score vs top probability: error ranking, calibration draws, adaptive streams, ε sweep (CPU, ~12 min)."""
 import argparse
 from pathlib import Path
 
 from surety.eval.analyze import load_collection
-from surety.eval.learned import ADAPTIVE, draws_table, ranking_table, static_draws, stream_draws
+from surety.eval.learned import ADAPTIVE, STATIC, SWEEP_COLORS, draws_table, ranking_table, static_draws, stream_draws
+from surety.eval.sweep import eps_sweep, sweep_plot, sweep_table
 
 
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--collect", type=Path, required=True)
     ap.add_argument("--seeds", type=int, default=200)
+    ap.add_argument("--sweep-seeds", type=int, default=100)
     ap.add_argument("--audit-rate", type=float, default=0.2)
+    ap.add_argument("--png", type=Path, default=Path("docs/results/kev_compact_learned_sweep.png"))
     ap.add_argument("--out", type=Path, required=True)
     a = ap.parse_args()
 
     rows = load_collection(a.collect)
+    sweep = eps_sweep(rows, n_seeds=a.sweep_seeds, policies=STATIC)
+    sweep_plot(sweep, a.png, colors=SWEEP_COLORS, direct_labels=True)
+    records = static_draws(rows, n_seeds=a.seeds)
     parts = [
         f"# Learned error score: {a.collect.stem}",
         f"- collection: `{a.collect.as_posix()}`; debiased+T probabilities (T fitted on cal)\n"
@@ -24,12 +30,20 @@ def main() -> None:
         "τ by Learn-then-Test, binomial fixed-sequence tests at δ = 0.1 (P(auto_err > eps) ≤ 0.1); risk@eps: "
         "RiskConformal, as in the M1 tables\n"
         "- the guarantees are approximate twice over: T is fitted on the same cal rows, and out-of-fold scores come from "
-        "models fitted on 4/5 of them; test_shift (held-out sites) has no guarantee at all",
+        "models fitted on 4/5 of them; test_shift (held-out sites) has no guarantee at all\n"
+        "- adaptive gates: one stream per seed (test_shift sites in random order), escalations labelled (w = 1), acted "
+        f"steps audited at rate {a.audit_rate:g} (w = 1/r); alearned's step size and margin were chosen on these "
+        "same streams (in-sample)",
         "## Error ranking on the original split (AUROC of each score for 'top option wrong')", ranking_table(rows),
         f"## Calibration draws ({a.seeds}: cal re-drawn from cal ∪ test_in, T, model and gates refit)",
-        draws_table(static_draws(rows, n_seeds=a.seeds)),
+        draws_table(records),
+        "## The same draws by task type (marginal guarantees: no per-type control is claimed)",
+        draws_table(records, by_type=True),
         *(f"## Adaptive gates on test_shift streams, eps={eps} ({a.seeds} site orders and audit draws)\n\n"
           f"{stream_draws(rows, eps, ADAPTIVE, a.audit_rate, a.seeds)}" for eps in (0.05, 0.1)),
+        f"## Target ε vs realized error and automation on test_shift ({a.sweep_seeds} calibration draws)",
+        sweep_table(sweep),
+        f"![learned ε sweep](../../{a.png.as_posix()})",
     ]
     a.out.parent.mkdir(parents=True, exist_ok=True)
     a.out.write_text("\n\n".join(parts) + "\n", encoding="utf-8")

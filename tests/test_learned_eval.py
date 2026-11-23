@@ -42,11 +42,11 @@ def test_ranking_table_lists_both_test_splits_by_task_type():
 
 def test_static_draws_cover_every_policy_and_split():
     rec = static_draws(_rows(), eps_list=(0.1,), n_seeds=2)
-    assert len(rec) == 2 * 3 * 2
+    assert len(rec) == 2 * 3 * 2 * 3  # seeds × policies × splits × (all + two task types)
     assert {r["policy"] for r in rec} == {"risk@0.1", "learned@0.1", "learned_pac@0.1"}
     assert all(0 <= r["auto_err"] <= r["automation"] <= 1 for r in rec)
-    table = draws_table(rec)
-    assert table.count("| 0.1 |") == 6
+    assert draws_table(rec).count("| 0.1 |") == 6
+    assert draws_table(rec, by_type=True).count("| 0.1 |") == 12
 
 
 @pytest.mark.parametrize("eps", [0.1])
