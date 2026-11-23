@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # LoRA fine-tune of Kev-4B on runs/kev_ft/train.jsonl (scripts/make_kev_train.py), then Kev's benchmark on heldout.jsonl.
 # Extra args go to kev.train and override the flags below (argparse keeps the last), e.g. --max_steps 5 for a smoke run.
+# On Apple MPS a 5-step trial logged no step in 20 min (reference Qwen3.5 kernels): use scripts/modal_train_kev.py.
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 KEV="$ROOT/third_party/kev"

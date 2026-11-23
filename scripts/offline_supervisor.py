@@ -1,5 +1,6 @@
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -9,14 +10,22 @@ from surety.gate import SplitConformal
 from surety.supervise.client import Supervisor
 
 
-def run(pairs, by_id, sup, out: Path, log=sys.stderr) -> None:
+def run(pairs, by_id, sup, out: Path, log=sys.stderr, setup: dict | None = None) -> None:
+    """setup: what changes the answers (model, mode, reasoning, max tokens, eps); a resume must match it exactly."""
+    setup = setup or {"model": sup.model, "json_mode": sup.json_mode}
     done = set()
     if out.exists():
-        for line in out.read_text().splitlines():
+        raw = out.read_bytes()
+        if raw and not raw.endswith(b"\n"):  # half-written last line: drop it, or the next record is appended onto it
+            raw = raw[: raw.rfind(b"\n") + 1]
+            out.write_bytes(raw)
+        for line in raw.decode().splitlines():
             try:
                 r = json.loads(line)
             except json.JSONDecodeError:
-                continue  # half-written last line
+                continue
+            if (theirs := {k: r.get(k) for k in setup}) != setup:
+                sys.exit(f"{out} holds rows from another setup {theirs}; use another --out")
             done.add((r["id"], r["cond"]))
     out.parent.mkdir(parents=True, exist_ok=True)
     with open(out, "a") as f:
@@ -36,7 +45,7 @@ def run(pairs, by_id, sup, out: Path, log=sys.stderr) -> None:
                     "chosen": chosen, "correct": chosen == r["gold_id"], "gold_in_set": r["gold_id"] in c,
                     "prompt_tokens": u.prompt_tokens, "completion_tokens": u.completion_tokens,
                     "latency_ms": u.latency_ms, "fallback_parsed": u.fallback_parsed,
-                    "abstained": u.abstained}) + "\n")
+                    "abstained": u.abstained, **setup}) + "\n")
                 f.flush()
             if k % 10 == 0:
                 print(f"{k}/{len(pairs)}", file=log)
@@ -54,8 +63,15 @@ def main() -> None:
     ap.add_argument("--model", default="gpt-oss:20b")
     ap.add_argument("--max-tokens", type=int, default=1024)
     ap.add_argument("--reasoning", choices=["low", "medium", "high"])
+    ap.add_argument("--json", action="store_true", help="constrain replies to {\"id\": <option id> | NONE}")
+    ap.add_argument("--api-key-env", help="name of the environment variable holding the endpoint's API key")
+    ap.add_argument("--no-temperature", action="store_true", help="omit temperature (OpenAI reasoning models reject it)")
+    ap.add_argument("--token-param", choices=["max_tokens", "max_completion_tokens"], default="max_tokens")
     ap.add_argument("--out", type=Path, required=True)
     a = ap.parse_args()
+    key = os.environ.get(a.api_key_env) if a.api_key_env else None
+    if a.api_key_env and not key:
+        sys.exit(f"{a.api_key_env} is not set")
 
     rows = load_collection(a.collect)
     probs = variants(rows)["debiased+T"]
@@ -64,7 +80,10 @@ def main() -> None:
     pairs = select_escalated(rows, policy, a.splits.split(","), a.n, a.seed, probs)
     by_id = {i.id: i for i in load_instances(a.root)}
     print(f"{len(pairs)} escalated rows, q={policy.q:.3f}", file=sys.stderr)
-    run(pairs, by_id, Supervisor(a.base_url, a.model, max_tokens=a.max_tokens, reasoning=a.reasoning), a.out)
+    run(pairs, by_id, Supervisor(a.base_url, a.model, max_tokens=a.max_tokens, reasoning=a.reasoning, api_key=key,
+                                 json_mode=a.json, temperature=None if a.no_temperature else 0.0,
+                                 token_param=a.token_param), a.out,
+        setup={"model": a.model, "json_mode": a.json, "reasoning": a.reasoning, "max_tokens": a.max_tokens, "eps": a.eps})
 
 
 if __name__ == "__main__":
