@@ -70,7 +70,7 @@ class Supervisor:
 
     def choose(self, state: DecisionState, candidate_ids: list[str] | None = None) -> tuple[str | None, Usage]:
         ids = [o.id for o in state.options]
-        allowed = [i for i in (ids if candidate_ids is None else candidate_ids) if i in ids]
+        allowed = ids if candidate_ids is None else [i for i in candidate_ids if i in ids]
         text, usage = self._complete(build_choose_prompt(state, candidate_ids))
         abstained = _is_none(text)
         chosen = None if abstained else _parse(text, allowed, last=usage.fallback_parsed)
