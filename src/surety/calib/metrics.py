@@ -2,8 +2,8 @@ import numpy as np
 
 
 def _top(probs, gold):
-    conf = np.array([max(p.values()) for p in probs], dtype=float)
-    wrong = np.array([max(p, key=p.get) != g for p, g in zip(probs, gold)], dtype=bool)
+    conf = np.array([max(p.values()) for p in probs])
+    wrong = np.array([max(p, key=p.get) != g for p, g in zip(probs, gold)])
     return conf, wrong
 
 
@@ -34,6 +34,8 @@ def brier(probs, gold) -> float:
 
 
 def confident_error_rate(probs, gold, threshold: float = 0.9) -> float:
+    if not len(probs):
+        return float("nan")
     conf, wrong = _top(probs, gold)
     return _mean((conf >= threshold) & wrong)
 
