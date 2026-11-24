@@ -72,9 +72,9 @@ class Supervisor:
         ids = [o.id for o in state.options]
         allowed = [i for i in (ids if candidate_ids is None else candidate_ids) if i in ids]
         text, usage = self._complete(build_choose_prompt(state, candidate_ids))
-        none = _is_none(text)
-        chosen = None if none else _parse(text, allowed, last=usage.fallback_parsed)
-        usage.abstained = none
+        abstained = _is_none(text)
+        chosen = None if abstained else _parse(text, allowed, last=usage.fallback_parsed)
+        usage.abstained = abstained
         return chosen, usage
 
     def slot_value(self, state: DecisionState, element_id: str) -> tuple[str | None, Usage]:
