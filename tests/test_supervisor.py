@@ -1,5 +1,8 @@
 import json
 
+import httpx
+import pytest
+
 from surety.supervise import MockSupervisor, Supervisor
 from surety.types import DecisionState, Option
 
@@ -128,3 +131,42 @@ def test_mock_supervisor_slots_and_candidates():
     assert m.slot_value(_state(), "b2")[0] == "x" and m.slot_value(_state(), "a1")[0] is None
     m.choose(_state(), ["a1"])
     assert m.candidates == [["a1"]] and m.calls == 3
+
+
+@pytest.mark.parametrize(
+    "reply, expected",
+    [
+        ("E12", "E12"),
+        ("E1", "E1"),
+        ("E1.", "E1"),
+        ("answer: E1, done", "E1"),
+        ("-E1", "E1"),
+        ("NONE, not a1", None),
+        ("a1 or NONE", None),
+        ("Z9", None),
+        ("E1x", None),
+    ],
+)
+def test_parse_cases(httpx_mock, reply, expected):
+    state = DecisionState("page", "pick", [Option("E1", "One"), Option("E12", "Twelve"), Option("a1", "Alpha")])
+    _reply(httpx_mock, reply)
+    assert _sup().choose(state)[0] == expected
+
+
+def test_none_in_reasoning_fallback_is_abstention(httpx_mock):
+    body = {"choices": [{"message": {"content": "", "reasoning": "b2 looks close but the answer is NONE"}}]}
+    httpx_mock.add_response(url="http://sup/v1/chat/completions", json=body)
+    chosen, usage = _sup().choose(_state())
+    assert chosen is None and usage.abstained and usage.fallback_parsed
+
+
+def test_candidate_outside_options_is_unparsed(httpx_mock):
+    _reply(httpx_mock, "z9")
+    chosen, _ = _sup().choose(_state(), ["z9", "a1"])
+    assert chosen is None
+
+
+def test_http_error_raises(httpx_mock):
+    httpx_mock.add_response(url="http://sup/v1/chat/completions", status_code=500)
+    with pytest.raises(httpx.HTTPStatusError):
+        _sup().choose(_state())

@@ -24,7 +24,7 @@ def _pattern(allowed: list[str]) -> str:
 def _parse(text: str, allowed: list[str], last: bool = False) -> str | None:
     if not allowed:
         return None
-    found = re.findall(rf"(?<![\w-])(?:{_pattern(allowed)})(?![\w-])", text)
+    found = re.findall(rf"(?<!\w)(?:{_pattern(allowed)})(?![\w-])", text)
     return (found[-1] if last else found[0]) if found else None
 
 
@@ -69,11 +69,13 @@ class Supervisor:
         return text, usage
 
     def choose(self, state: DecisionState, candidate_ids: list[str] | None = None) -> tuple[str | None, Usage]:
-        allowed = candidate_ids if candidate_ids is not None else [o.id for o in state.options]
+        ids = [o.id for o in state.options]
+        allowed = [i for i in (ids if candidate_ids is None else candidate_ids) if i in ids]
         text, usage = self._complete(build_choose_prompt(state, candidate_ids))
-        chosen = _parse(text, allowed, last=usage.fallback_parsed)
-        usage.abstained = chosen is None and _is_none(text)
-        return chosen, usage
+        if _is_none(text):
+            usage.abstained = True
+            return None, usage
+        return _parse(text, allowed, last=usage.fallback_parsed), usage
 
     def slot_value(self, state: DecisionState, element_id: str) -> tuple[str | None, Usage]:
         text, usage = self._complete(build_slot_prompt(state, element_id))
