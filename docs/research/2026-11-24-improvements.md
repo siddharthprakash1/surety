@@ -351,7 +351,12 @@ From §2's first three recommendations: `src/surety/gate/learned.py` (`LearnedRi
 ## 6 Roadmap (ranked)
 
 1. **Fine-tune Kev-4B** (Modal launcher ready; owner's account). The executor's accuracy (0.47) caps everything above,
-   and the BLOCKED failure mode is a clear target for training data.
+   and the BLOCKED failure mode is a clear target for training data. *Tried the cheap version on 2026-11-25*: eight
+   per-action log-prior offsets fitted on cal raise held-out accuracy 0.458 → 0.588, but the gates cannot certify the
+   extra action-prediction picks on new sites (static gates overshoot there; adaptive gates hold ε and keep little
+   of the gain). See `docs/results/m1.md` and `results/m1/kev_compact_prior.md`. Calibration data from more sites
+   is the other half of this item: an accuracy gain only becomes safe automation if the gate's calibration
+   transfers to the sites it is deployed on.
 2. **H4 with the learned gates.** Run `--systems ...,learned,alearned` next to arisk. This confirms on new data the
    choices made in-sample here: features, γ, margin.
 3. **Two-tier critical detector.** Cheap high-recall keywords, then an LLM judge on the flagged steps (§4.3).

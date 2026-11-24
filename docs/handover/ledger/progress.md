@@ -189,3 +189,9 @@ Review (independent agent, 2026-11-16 fix round + learned gates): 8 defects, 7 f
 Ruling: answered audits weigh 1/(r·q̂), q̂ = the stream's answered/asked audits (missing-at-random assumption), counts saved per system for resume — cost if wrong: if hard steps go unanswered more often, arisk still under-counts errors; --supervisor-json keeps q near 1.
 Ruling: the learned model's terminal feature keeps none_of_these as terminal live although WebJev has none (it errs toward escalation) — cost if wrong: more supervisor calls for learned systems in H4 than offline predicts.
 Pushed: branch overnight-2026-11-16 to origin on the owner's instruction (2026-11-24, "Commit all this on GitHub"); main untouched, no pull request opened.
+
+## 2026-11-25 (option-prior correction)
+
+Local main and overnight-2026-11-16 reset to the rewritten origin history (same trees; the early commits' author email was changed on GitHub overnight) — cost if wrong: none, the old hashes remain in the reflog.
+Ruling: PriorCorrector fits one offset per recurring action id, page-element ids (E12, clickable_12, bid:12, e12) excluded, L2 1.0 fixed before looking at results, damped Newton — cost if wrong: a slightly weaker correction than an unpenalised fit (held-out action-prediction accuracy 0.570 vs 0.59 unpenalised).
+Ruling: the correction is not a default anywhere (offline analysis only; live MiniWoB ids are page elements, so it would be a no-op there): on held-out sites the static gates overshoot ε with it and adaptive gates keep little of its gain — cost if wrong: ~4–9 points of automation on calibration-like sites left unused.

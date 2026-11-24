@@ -17,6 +17,11 @@ SWEEP_COLORS = {"risk": "#2a78d6", "learned_pac": "#1baf7a", "learned": "#eda100
 TESTS = ("test_in", "test_shift")
 
 
+def baseline(rows: list[dict]) -> list[dict[str, float]]:
+    """The M1 probabilities: debiased, temperature fitted on the rows' cal split."""
+    return variants(rows)["debiased+T"]
+
+
 def auroc(score: np.ndarray, wrong: np.ndarray) -> float:
     """P(score of a wrong step > score of a correct step), ties counted half (Mann–Whitney)."""
     ranks = np.empty(len(score))
@@ -29,9 +34,9 @@ def auroc(score: np.ndarray, wrong: np.ndarray) -> float:
     return float((ranks[wrong == 1].sum() - n_w * (n_w + 1) / 2) / (n_w * n_c)) if n_w and n_c else float("nan")
 
 
-def ranking_table(rows: list[dict]) -> str:
+def ranking_table(rows: list[dict], probs_fn=baseline) -> str:
     """How well each score ranks the executor's errors on the test splits (higher AUROC = better), by task type."""
-    probs = variants(rows)["debiased+T"]
+    probs = probs_fn(rows)
     gate = LearnedRisk(0.1)
     gate.fit(*_split(rows, probs, "cal"))
     names = ("p_top", "margin", "entropy")
@@ -47,11 +52,13 @@ def ranking_table(rows: list[dict]) -> str:
     return _table(("split", "task_type", "n", "error_rate", *(f"AUROC {n}" for n in names), "AUROC learned"), body)
 
 
-def static_draws(rows: list[dict], eps_list=(0.05, 0.1), n_seeds: int = 200) -> list[dict]:
+def static_draws(rows: list[dict], eps_list=(0.05, 0.1), n_seeds: int = 200, probs_fn=baseline,
+                 label: str = "") -> list[dict]:
+    """probs_fn(rows) -> probabilities, refit on each draw's cal split; label is appended to the policy names."""
     out = []
     for seed in range(n_seeds):
         rs = resplit(rows, seed)
-        probs = variants(rs)["debiased+T"]
+        probs = probs_fn(rs)
         cal = _split(rs, probs, "cal")
         for eps in eps_list:
             for make in STATIC:
@@ -65,7 +72,8 @@ def static_draws(rows: list[dict], eps_list=(0.05, 0.1), n_seeds: int = 200) -> 
                     for task in ("all", "action_prediction", "element_grounding"):
                         keep = [k for k, i in enumerate(idx) if task in ("all", rs[i]["task_type"])]
                         s, g = [sets[k] for k in keep], [rs[idx[k]]["gold_id"] for k in keep]
-                        out.append({"seed": seed, "eps": eps, "policy": policy.name, "split": split, "task_type": task,
+                        out.append({"seed": seed, "eps": eps, "policy": policy.name + label, "split": split,
+                                    "task_type": task,
                                     "auto_err": m.autonomous_error_rate(s, g), "automation": m.automation_rate(s)})
     return out
 
@@ -85,10 +93,11 @@ def draws_table(records: list[dict], by_type: bool = False) -> str:
                    "auto_err_2.5–97.5%", "P(auto_err>eps)", "automation", "automation_2.5–97.5%"), body)
 
 
-def stream_draws(rows: list[dict], eps: float, makers: dict, audit_rate: float = 0.2, n_seeds: int = 200) -> str:
+def stream_draws(rows: list[dict], eps: float, makers: dict, audit_rate: float = 0.2, n_seeds: int = 200,
+                 probs_fn=baseline) -> str:
     """Each adaptive gate on the same site-ordered test_shift streams and audit draws (as resample.adaptive_draws).
     makers: name -> make(eps, horizon, audit_rate), horizon = the stream's length."""
-    probs = variants(rows)["debiased+T"]
+    probs = probs_fn(rows)
     cal = _split(rows, probs, "cal")
     body = []
     for name, make in makers.items():

@@ -94,6 +94,8 @@ Without audits acted steps never report errors and α climbs to its cap. At r = 
 
 Online, the learned gate with γ = 0.005, a 0.8·ε target and doubly-robust audit feedback exceeds ε in 9 % / 4 % of 200 held-out streams (ε = 0.05 / 0.1) instead of arisk's 40 % / 35 %, while automating more (0.267 vs 0.236; 0.372 vs 0.348). The ablation separates the pieces: the learned score alone, with ACI's γ = 0.02, is as unstable as arisk (45 % / 46 %); the smaller step and margin alone, on p_top, are safe but automate less (0.214 / 0.301). These three settings were chosen on the same streams, so they need confirmation on new data.
 
+**Correcting the executor's label bias raises accuracy but not, yet, certified automation on new sites** (`results/m1/kev_compact_prior.md`). Zero-shot Kev ranks BLOCKED first on 30 % of action-prediction steps and is wrong on 239 of those 242. Eight per-action log-prior offsets fitted on the calibration steps (contextual calibration with a labelled estimate of the bias; BLOCKED −2.85, CLICK +2.67) lift top-1 accuracy on held-out sites from 0.458 to 0.588 (action prediction 0.310 → 0.570). Over 200 calibration draws the PAC gate on corrected probabilities automates 0.306 / 0.453 at ε = 0.05 / 0.1 on calibration sites (from 0.273 / 0.388), within ε, but on held-out sites it overshoots (0.052 and 0.116, over ε in 49 % / 92 % of draws). The excess is entirely action prediction: the gate acts on twice as many of those steps, and on new sites their errors rank worse (AUROC of p_top 0.728 → 0.666). Fitting the correction out-of-site for the steps the error model learns from, or giving the model the raw probabilities and a flag for steps whose pick the correction changed, does not close the gap; adaptive gates hold ε on held-out streams by returning most of the gain (automation 0.266 / 0.406 vs 0.267 / 0.372). Accuracy gained on the calibration distribution does not by itself become automation that a gate can certify under site shift.
+
 ![Figure 2](../results/kev_compact_learned_sweep.png)
 
 *Figure 2. As Figure 1 for risk control and the two learned gates (100 calibration draws, held-out sites).*
@@ -115,6 +117,7 @@ Online, the learned gate with γ = 0.005, a 0.8·ε target and doubly-robust aud
 - H3 used a 20B supervisor at low reasoning with free-text answers; H4 (end-to-end success vs supervisor calls) is not measured. The live harness has run in a browser only with scripted models.
 - Critical-action detection is keyword-based with low recall; the planned learned (`noul`) detector is not built.
 - The learned gates' features and the adaptive gate's step size, margin and feedback rule were chosen after looking at the test splits; the learned-score results need a fresh collection or the live benchmark to confirm.
+- Calibration data come from one set of sites; an executor change that helps on average (the label-bias correction) shifts which steps the gate acts on toward steps whose errors do not transfer across sites.
 
 ## 7 Next
 

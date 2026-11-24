@@ -123,3 +123,21 @@ Two results changed the plan:
 - Every table regenerates on CPU from `artifacts/m1/` (`offline_analyze`, `offline_ci`, `offline_sweep`,
   `offline_groups`, `offline_learned`, `eval_webguard`); no model was run, as before (no local models on this laptop).
 - Untouched: a training job from another project (`p1`, SmolLM) was running on this laptop all night.
+
+## Addendum 2026-11-25: correcting the executor's label bias
+
+Asked "we have hit a ceiling; what next?": the ceiling is the executor (46 % right on held-out sites; a perfect gate
+would automate 51 % at ε = 0.05, the PAC gate 27 %). The cheapest lever, an eight-number per-action prior correction
+(`PriorCorrector`, `scripts/offline_prior.py`, `results/m1/kev_compact_prior.md`), was run through the full pipeline:
+
+- Accuracy on held-out sites 0.458 → 0.588 (action prediction 0.310 → 0.570): Kev's raw scores are badly biased
+  toward BLOCKED and away from CLICK.
+- On calibration sites the PAC gate then automates 0.306 / 0.453 at ε = 0.05 / 0.1 (from 0.273 / 0.388) within ε.
+- On held-out sites it overshoots (0.052 and 0.116, over ε in 49 % / 92 % of 200 draws), entirely through
+  action-prediction steps, whose errors rank worse on new sites; two fixes tried did not close the gap. Adaptive
+  gates hold ε on held-out streams but keep little of the gain (automation 0.266 / 0.406 vs 0.267 / 0.372).
+- Not adopted as a default. It sharpens the plan: the fine-tune should target the label bias, and calibration data
+  must come from more sites for accuracy gains to become automation that holds on new sites.
+
+Also: on GitHub, `main` and this branch were rewritten overnight (identical files; the early commits' author email
+changed). The local branches now follow the rewritten history, and new commits build on it.
