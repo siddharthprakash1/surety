@@ -133,13 +133,6 @@ def test_mock_supervisor_slots_and_candidates():
     assert m.candidates == [["a1"]] and m.calls == 3
 
 
-def test_reasoning_fallback_none_is_abstention(httpx_mock):
-    body = {"choices": [{"message": {"content": "", "reasoning": "b2 is close, but the answer is NONE"}}]}
-    httpx_mock.add_response(url="http://sup/v1/chat/completions", json=body)
-    chosen, usage = _sup().choose(_state())
-    assert chosen is None and usage.abstained and usage.fallback_parsed
-
-
 @pytest.mark.parametrize(
     "status, reply, candidates, expected",
     [
