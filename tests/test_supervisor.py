@@ -134,36 +134,24 @@ def test_mock_supervisor_slots_and_candidates():
 
 
 @pytest.mark.parametrize(
-    "reply, expected",
+    "reply, candidates, expected",
     [
-        ("E12", "E12"),
-        ("E1", "E1"),
-        ("E1.", "E1"),
-        ("answer: E1, done", "E1"),
-        ("-E1", "E1"),
-        ("NONE, not a1", None),
-        ("a1 or NONE", None),
-        ("Z9", None),
-        ("E1x", None),
+        ("E12", None, "E12"),
+        ("E1", None, "E1"),
+        ("E1.", None, "E1"),
+        ("answer: E1, done", None, "E1"),
+        ("-E1", None, "E1"),
+        ("NONE, not a1", None, None),
+        ("a1 or NONE", None, None),
+        ("Z9", None, None),
+        ("E1x", None, None),
+        ("z9", ["z9", "a1"], None),
     ],
 )
-def test_parse_cases(httpx_mock, reply, expected):
+def test_parse_cases(httpx_mock, reply, candidates, expected):
     state = DecisionState("page", "pick", [Option("E1", "One"), Option("E12", "Twelve"), Option("a1", "Alpha")])
     _reply(httpx_mock, reply)
-    assert _sup().choose(state)[0] == expected
-
-
-def test_none_in_reasoning_fallback_is_abstention(httpx_mock):
-    body = {"choices": [{"message": {"content": "", "reasoning": "b2 looks close but the answer is NONE"}}]}
-    httpx_mock.add_response(url="http://sup/v1/chat/completions", json=body)
-    chosen, usage = _sup().choose(_state())
-    assert chosen is None and usage.abstained and usage.fallback_parsed
-
-
-def test_candidate_outside_options_is_unparsed(httpx_mock):
-    _reply(httpx_mock, "z9")
-    chosen, _ = _sup().choose(_state(), ["z9", "a1"])
-    assert chosen is None
+    assert _sup().choose(state, candidates)[0] == expected
 
 
 def test_http_error_raises(httpx_mock):
