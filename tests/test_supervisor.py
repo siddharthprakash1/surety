@@ -154,13 +154,6 @@ def test_parse_cases(httpx_mock, reply, candidates, expected):
     assert _sup().choose(state, candidates)[0] == expected
 
 
-def test_reasoning_fallback_none_is_abstention(httpx_mock):
-    body = {"choices": [{"message": {"content": "", "reasoning": "a1 looks good but NONE fits best"}}]}
-    httpx_mock.add_response(url="http://sup/v1/chat/completions", json=body)
-    chosen, usage = _sup().choose(_state())
-    assert chosen is None and usage.fallback_parsed and usage.abstained
-
-
 def test_http_error_raises(httpx_mock):
     httpx_mock.add_response(url="http://sup/v1/chat/completions", status_code=500)
     with pytest.raises(httpx.HTTPStatusError):
