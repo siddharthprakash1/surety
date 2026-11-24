@@ -1,7 +1,7 @@
 # 2026-11-24: restore, research, learned-score gates
 
 Session: Claude Code on the Windows laptop, overnight 2026-11-24 (IST), while the owner slept. Branch
-`overnight-2026-11-16`, not pushed (the owner said no to pushing).
+`overnight-2026-11-16`, pushed to GitHub on the owner's go-ahead the next morning; not merged into `main`.
 
 ## TL;DR
 
@@ -14,10 +14,9 @@ Session: Claude Code on the Windows laptop, overnight 2026-11-24 (IST), while th
 
 ## What needs you
 
-1. **Push.** Nothing is pushed; a second folder loss would cost everything since the last backup. A verified git
-   bundle of `main` + this branch is at `C:\Users\DELL\Documents\surety-backups\overnight-2026-11-16.bundle`
-   (restore with `git clone <bundle> surety` or `git fetch <bundle> overnight-2026-11-16`). When you are ready:
-   `git push -u origin overnight-2026-11-16`.
+1. **Push: done** (2026-11-24, `origin/overnight-2026-11-16`). Merging it into `main` (a pull request) is the next
+   call. The local bundle backup of `main` + this branch stays at
+   `C:\Users\DELL\Documents\surety-backups\overnight-2026-11-16.bundle`.
 2. Unchanged from 2026-11-16: a Modal account for the Kev-4B fine-tune, a hosted supervisor key for H3, the
    keyword decision for the critical detector (now with research behind it, §Research).
 3. New, optional: whether ε should bound the joint rate P(act ∧ wrong) (today; ~1 in 4–5 autonomous actions may be wrong at ε = 0.05) or the error among acted steps (selective risk; research §2); and whether to adopt the two-tier detector (research §4).
@@ -117,8 +116,8 @@ Two results changed the plan:
 
 ## State of the tree
 
-- Branch `overnight-2026-11-16`: the rebuilt 2026-11-16 work plus today's commits on top of `006f180`; nothing
-  pushed. A verified bundle of `main` + the branch is refreshed after the last commit (see "What needs you").
+- Branch `overnight-2026-11-16`: the rebuilt 2026-11-16 work plus today's commits on top of `006f180`; pushed to
+  `origin`, `main` untouched. A verified bundle of `main` + the branch is kept locally (see "What needs you").
 - `uv run pytest -q`: 349 passed, 2 skipped; `SURETY_LIVE=1 uv run pytest tests/integration`: 3 passed (MiniWoB++
   served locally on :8765, stopped afterwards).
 - Every table regenerates on CPU from `artifacts/m1/` (`offline_analyze`, `offline_ci`, `offline_sweep`,
