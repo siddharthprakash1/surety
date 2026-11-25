@@ -147,23 +147,23 @@ The committed rows reproduce every table without a model: `--collect artifacts/m
 
 Windows 11: setup, tests, data, plan (byte-for-byte identical), fine-tune data, tables, uncertainty and WebGuard steps run as written; collection and H3 need the model servers and were not run there. Set `HF_HUB_DISABLE_SYMLINKS=1` if Hugging Face downloads fail with WinError 1314, and `HF_HUB_DISABLE_IMPLICIT_TOKEN=1` if a stale stored token makes a public repo 404. Kev's README lists L40S/H100 for Kev-4B on CUDA and a 4 GB GPU for Kev-0.8B; on Windows its lockfile installs CPU torch, and on a 4 GB laptop GPU with 16 GB of RAM, Kev-0.8B's first request grew the pagefile by ~4 GB.
 
-**Kev-4B fine-tune on Modal (M2)**: a fine-tuned Kev must never train on a calibration or test site, so it has its own plan with three disjoint site groups (721 training, 361 calibration, 361 test), each split spread over its sites (at most 4 steps a site; M1's top 10 sites hold 36–41 % of each split):
+**Kev-4B fine-tune on Modal (M2)**: a fine-tuned Kev must never train on a website it is calibrated or tested on, so it has its own plan with three disjoint groups of websites (610 training, 304 calibration, 304 test). Hosts are grouped by registrable domain, so en. and de.wikipedia.org, or amazon.com and amazon.de, are one website. Each split is spread over its websites, at most 4 steps a website (M1's top 10 sites hold 36–41 % of each split):
 
 ```bash
 uv run python scripts/make_plan.py --design spread --cal-frac 0.25 --test-frac 0.25 --n-cal 600 --n-test-in 400 --n-test-shift 600 --max-options 64 --seed 0 --out artifacts/m2/plan.json
-uv run python scripts/make_kev_train.py --plan artifacts/m2/plan.json   # runs/kev_ft: 8,000 train / 500 held-out steps, training sites only
+uv run python scripts/make_kev_train.py   # runs/kev_ft from M2's training websites: 8,000 train / 500 held-out steps
 uvx modal setup                                                         # once; H100s need a payment method
-uvx --from modal==1.5.5 modal run scripts/modal_train_kev.py --max-steps 5   # smoke
-uvx --from modal==1.5.5 modal run scripts/modal_train_kev.py --name webjev-v1   # ~1–2 H100-hours
-# score in one container (kev.serve + offline_collect; the checkpoint stays on Modal): parity with M1's rows first
+uvx --from modal==1.5.5 modal run scripts/modal_train_kev.py --max-steps 5             # smoke
+uvx --from modal==1.5.5 modal run --detach scripts/modal_train_kev.py --name webjev-v1  # ~1–2 H100-hours
+# score in one container (kev.serve + offline_collect; the checkpoint stays on Modal); files land in runs/scores/<name>/
 uvx --from modal==1.5.5 modal run scripts/modal_score_kev.py --run zero-shot --plan artifacts/m1/plan.json --name m1-parity --limit 100
-uvx --from modal==1.5.5 modal run scripts/modal_score_kev.py --run zero-shot --plan artifacts/m2/plan.json --name m2-zero-shot
-uvx --from modal==1.5.5 modal run scripts/modal_score_kev.py --run webjev-v1 --plan artifacts/m2/plan.json --name m2-webjev-v1
-uvx --from modal==1.5.5 modal volume get surety-kev-ft scores/m1-parity runs/scores/m1-parity   # likewise each --name
 uv run python scripts/score_parity.py artifacts/m1/kev_compact.jsonl runs/scores/m1-parity/rows.jsonl
+uvx --from modal==1.5.5 modal run --detach scripts/modal_score_kev.py --run zero-shot --plan artifacts/m2/plan.json --name m2-zero-shot
+uvx --from modal==1.5.5 modal run --detach scripts/modal_score_kev.py --run webjev-v1 --plan artifacts/m2/plan.json --name m2-webjev-v1
+uvx --from modal==1.5.5 modal run scripts/modal_score_kev.py --name m2-webjev-v1 --fetch   # files only, if this laptop disconnected
 ```
 
-The training launcher reuses Kev's image and passes `--max_state 7552`, which Kev's own fine-tune skill does not (its 384-token default drops ~94% of WebJev records). A re-score of 1,600 steps should take well under an hour on an H100 (estimate; M1's took 1.8 h on Apple Silicon); the zero-shot re-score on M2 is the like-for-like baseline, since H100 bf16 numerics differ from M1's MLX rows.
+The training launcher reuses Kev's image, passes `--max_state 7552` (Kev's own fine-tune skill keeps a 384-token default that drops ~94% of WebJev records) and refuses training data not built from `artifacts/m2/plan.json`. `--detach` keeps a long run going if this laptop sleeps; a LoRA run cannot resume. The scoring job resumes a `--name` and refuses one scored with another checkpoint or plan. A re-score of 1,600 steps should take well under an hour on an H100 (estimate; M1's took 1.8 h on Apple Silicon). The zero-shot re-score on M2 is the like-for-like baseline: H100 bf16 numerics differ from M1's MLX rows, and the fine-tuned head is served at temperature 1.0 (`kev.calibrate` is not run), which the gates absorb because they refit T on cal.
 
 **Live (MiniWoB++)**: `uv sync --group dev --extra live && uv run playwright install chromium`, serve `miniwob-plusplus/miniwob/html` on :8765, `MINIWOB_URL=http://127.0.0.1:8765/miniwob/`, then e.g. `uv run python scripts/run_miniwob.py --task login-user --backend kev --policy arisk:0.05 --fit artifacts/m1/kev_compact.jsonl --audit-rate 0.2 --supervisor-url ... --supervisor-json`. `SURETY_LIVE=1 uv run pytest tests/integration` runs the browser tests with scripted models.
 
@@ -174,7 +174,7 @@ The training launcher reuses Kev's image and passes `--max_state 7552`, which Ke
 - M1 offline study on Kev-4B: done, with calibration-draw and site-bootstrap uncertainty.
 - Learned-score gates (2026-11-24): `learned`, `learned_pac`, `alearned` in `--policy` / `--fit` specs and as opt-in H4 systems; offline results above; not yet run live with models. Research behind them and the next candidates: `docs/research/2026-11-24-improvements.md`.
 - Live harness: runs in Chromium on MiniWoB++ with scripted models (login-user stops at the password field with `stop:credentials`; click-test reward 1.0). The gate is fitted offline (`--fit`, scored with the fit's 5/3 orderings), calibrated live, and updated online from escalations and audits; `run_h4.py` keeps one gate per system across its task stream, while `run_miniwob.py` plays a single episode. Every MiniWoB++ task opens without error; clickable spans/divs/icons are now options (tasks with no option 27 → 4, `results/miniwob_observe.md`). H4 runner ready (`scripts/run_h4.py`); no run with real models yet.
-- Kev UI fine-tune (M2): plan, data and Modal jobs ready, not run (needs a Modal account). `artifacts/m2/plan.json` keeps training, calibration and test sites disjoint; the training data (8,000 / 500 steps from 615 / 31 training sites, `artifacts/m2/kev_ft_stats.json`) has BLOCKED as the answer on 1.2 % of action steps, against zero-shot Kev's 30 % BLOCKED-first rate. `scripts/modal_score_kev.py` is tested against a stand-in server, not on Modal.
+- Kev UI fine-tune (M2): plan, data and Modal jobs ready, not run (needs a Modal account). `artifacts/m2/plan.json` keeps training, calibration and test websites disjoint; the training data (8,000 / 500 steps from 529 / 31 training websites, `artifacts/m2/kev_ft_stats.json`) has BLOCKED as the answer on 1.25 % of action steps, against zero-shot Kev's 30 % BLOCKED-first rate. `scripts/modal_score_kev.py` is tested against a stand-in server, not on Modal.
 - H3 with a stronger supervisor: `scripts/offline_supervisor.py --json --api-key-env <VAR> --base-url <endpoint> --model <model>` (`--no-temperature --token-param max_completion_tokens` for OpenAI reasoning models).
 - Critical detection: add the spec's Kev `noul` check; candidate keyword families and their WebGuard trade-offs are in `results/webguard/detector.md`.
 - Clef-flash as a second executor (Apple Silicon); Mind2Web (human labels); then WebArena-Verified hard subset and H4.

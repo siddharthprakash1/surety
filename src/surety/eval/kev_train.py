@@ -2,6 +2,7 @@ import json
 import random
 from pathlib import Path
 
+from surety.eval.sites import website
 from surety.eval.webjev import compile_instance, draw_balanced
 from surety.types import Instance
 
@@ -10,13 +11,16 @@ QID = {"action_prediction": "action", "element_grounding": "element"}
 
 def build_records(instances: list[Instance], plan: dict, n_train: int, n_heldout: int, seed: int,
                   max_options: int = 64, heldout_site_cap: int = 60) -> tuple[list[dict], list[dict]]:
-    # a spread (M2) plan names its training sites; an M1 plan trains on its calibration sites, minus the plan's own steps
-    sites = set(plan["train_sites"]) if "train_sites" in plan else set(plan["cal_sites"]) - set(plan["held_sites"])
+    # a spread (M2) plan names its training hosts and holds Kev's held-out steps out by website; an M1 plan trains on its
+    # calibration sites, minus the plan's own steps, and holds out by host
+    spread = "train_sites" in plan
+    sites = set(plan["train_sites"]) if spread else set(plan["cal_sites"]) - set(plan["held_sites"])
+    key = website if spread else (lambda s: s)
     excluded = set(plan["cal"]) | set(plan["test_in"]) | set(plan["test_shift"])
     by_site: dict[str, list[Instance]] = {}
     for i in instances:
         if i.site in sites and i.id not in excluded and len(i.options) <= max_options:
-            by_site.setdefault(i.site, []).append(i)
+            by_site.setdefault(key(i.site), []).append(i)
     rng = random.Random(seed)
     order = sorted(by_site)
     rng.shuffle(order)

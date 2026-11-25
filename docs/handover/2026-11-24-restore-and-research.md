@@ -146,18 +146,31 @@ changed). The local branches now follow the rewritten history, and new commits b
 
 The owner chose the Kev-4B fine-tune as the next step and is setting up Modal. Ready, not run:
 
-- **Plan M2** (`artifacts/m2/plan.json`, `make_plan.py --design spread`): training, calibration and test sites are
-  disjoint (721 / 361 / 361), and each split is spread over its sites (at most 4 steps a site; cal spans 316 sites,
-  test_shift 354). On M1's plan a fine-tuned Kev would be calibrated on its own training sites (549 of 600 cal steps),
-  and the prior-correction result shows that calibration on one set of sites over-promises on others.
-- **Training data** rebuilt from M2's training sites (`artifacts/m2/kev_ft_stats.json`): 8,000 / 500 steps from 615 /
-  31 sites. BLOCKED is the gold answer on 1.2 % of its action steps.
+- **Plan M2** (`artifacts/m2/plan.json`, `make_plan.py --design spread`): training, calibration and test websites are
+  disjoint (610 / 304 / 304). Hosts are grouped into websites by registrable domain (`surety.eval.sites.website`:
+  en. and de.wikipedia.org, apple.com and apps.apple.com, amazon.com and amazon.de are one website). Each split is
+  spread over its websites (at most 4 steps a website; cal spans 283 websites, test_shift 304) and alternates task
+  types. On M1's plan a fine-tuned Kev would be calibrated on its own training sites (549 of 600 cal steps), and the
+  prior-correction result shows that calibration on one set of sites over-promises on others.
+- **Training data** rebuilt from M2's training websites (`artifacts/m2/kev_ft_stats.json`): 8,000 / 500 steps from
+  529 / 31 websites; no calibration or test step is on a training website. BLOCKED is the gold answer on 1.25 % of
+  its action steps. The training launcher refuses data not built from M2's plan.
 - **Scoring job** `scripts/modal_score_kev.py`: kev.serve and offline_collect in one container on the `surety-kev-ft`
-  volume, so a checkpoint is scored where it was trained. It refuses a server that runs anything but the requested
-  checkpoint (kev.serve otherwise falls back silently). Tested locally against a stand-in server
-  (`tests/test_serve_collect.py`); both Modal launchers load and parse their options with modal 1.5.5; nothing has
-  run on Modal.
+  volume, so a checkpoint is scored where it was trained. Rows, model card and log are saved to `runs/scores/<name>/`
+  (`--fetch` after a disconnect). It refuses a server that runs anything but the requested checkpoint (kev.serve
+  otherwise falls back silently) and a `--name` already scored with another checkpoint or plan. Tested locally
+  against a stand-in server (`tests/test_serve_collect.py`); both Modal launchers load and parse their options with
+  modal 1.5.5; nothing has run on Modal.
 - **Parity check** `scripts/score_parity.py`: re-score 100 of M1's steps zero-shot first and compare with M1's rows.
+- **Review** (independent agent, of the first version): seven findings, all fixed. The plan split hosts, not
+  websites: 41 websites spanned groups, and 221 of its 1,600 cal/test steps were on a website the training file
+  trains on. The documented `modal volume get` would have misplaced the rows. Re-using a `--name` with another
+  checkpoint would have passed old rows as new. cal and test_in were grouped by task type, so a `--limit` skewed.
+  Nothing tied the uploaded training file to M2. Long runs lacked `--detach`. The fine-tuned head is served at
+  temperature 1.0; the gates refit T on cal, so this is documented, not changed.
+- **M1 caveat** found on the way: M1 also holds out hosts, not websites. 89 of its 600 test_shift steps (15 %) are on a
+  website that also has calibration hosts, so M1's held-out-site numbers are somewhat optimistic (report §6). M1's
+  artifacts are unchanged.
 
 Order once Modal works: smoke train, parity, full train, zero-shot and fine-tuned re-scores on M2, then the offline
-analyses on M2's rows. `uv run pytest -q`: 364 passed, 2 skipped.
+analyses on M2's rows. `uv run pytest -q`: 379 passed, 2 skipped.

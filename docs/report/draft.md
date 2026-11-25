@@ -118,10 +118,11 @@ Online, the learned gate with γ = 0.005, a 0.8·ε target and doubly-robust aud
 - Critical-action detection is keyword-based with low recall; the planned learned (`noul`) detector is not built.
 - The learned gates' features and the adaptive gate's step size, margin and feedback rule were chosen after looking at the test splits; the learned-score results need a fresh collection or the live benchmark to confirm.
 - Calibration data come from one set of sites; an executor change that helps on average (the label-bias correction) shifts which steps the gate acts on toward steps whose errors do not transfer across sites.
+- M1 holds out hosts, not websites: 89 of the 600 held-out steps (15 %) are on a website (registrable domain) that also has calibration hosts, such as another Wikipedia language edition, so the held-out-site numbers are somewhat optimistic. The fine-tune's plan (M2) splits by website.
 
 ## 7 Next
 
-Fine-tune Kev-4B on WebJev (8,000 steps from 27 training sites disjoint from every evaluation row; Modal launcher ready) and re-collect on the same plan; H3 with a stronger supervisor and JSON-constrained ids; a second executor; H4 on 68 text-centric MiniWoB++ tasks (runner ready: six systems — supervisor-only, executor-only, fixed threshold, escalate-on-done, risk, adaptive risk — with one gate per system across the task stream), then WebArena-Verified. Live autonomous error needs supervisor labels on acted steps: audits give them for adaptive risk; a shadow-label rate for every system would make live H2 comparable.
+Fine-tune Kev-4B on WebJev and score it on a new plan (M2) whose training, calibration and test websites are disjoint (8,000 training steps from 529 websites; Modal training and scoring jobs ready), next to a zero-shot re-score of the same plan; H3 with a stronger supervisor and JSON-constrained ids; a second executor; H4 on 68 text-centric MiniWoB++ tasks (runner ready: six systems — supervisor-only, executor-only, fixed threshold, escalate-on-done, risk, adaptive risk — with one gate per system across the task stream), then WebArena-Verified. Live autonomous error needs supervisor labels on acted steps: audits give them for adaptive risk; a shadow-label rate for every system would make live H2 comparable.
 
 ## 8 Reproducibility
 

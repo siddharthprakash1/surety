@@ -485,6 +485,15 @@ wheels = [
 ]
 
 [[package]]
+name = "publicsuffixlist"
+version = "1.1.2.20261124"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/9e/28/140ad19bb7738134c3b3515dc0e63765e0617958c5d1fd3b1de7999f39d2/publicsuffixlist-1.1.2.20261124.tar.gz", hash = "sha256:3587649d7633bbc69d8219f89dbe5aec540cbec7ee22a893f7aa496bf2ed2233", size = 108187, upload-time = "2026-11-24T13:31:47.94Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/15/20/d6c1aa56ef0d032a47d3dd656171f4f240197e1cda71f2d4edf2b7bdda77/publicsuffixlist-1.1.2.20261124-py3-none-any.whl", hash = "sha256:462561dd59abeec26fa7e753f137f93c2958a36950e43cf3787c648ec79ea79a", size = 110885, upload-time = "2026-11-24T13:31:46.656Z" },
+]
+
+[[package]]
 name = "pyarrow"
 version = "26.0.1"
 source = { registry = "https://pypi.org/simple" }
@@ -594,6 +603,7 @@ dependencies = [
     { name = "httpx" },
     { name = "matplotlib" },
     { name = "numpy" },
+    { name = "publicsuffixlist" },
     { name = "pyarrow" },
 ]
 
@@ -620,6 +630,7 @@ requires-dist = [
     { name = "matplotlib", specifier = ">=3.9" },
     { name = "numpy", specifier = ">=2" },
     { name = "playwright", marker = "extra == 'live'", specifier = ">=1.50" },
+    { name = "publicsuffixlist", specifier = ">=1.1.2.20261124" },
     { name = "pyarrow", specifier = ">=18" },
 ]
 provides-extras = ["live"]

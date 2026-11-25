@@ -14,6 +14,7 @@ dependencies = [
     "numpy>=2",
     "pyarrow>=18",
     "matplotlib>=3.9",
+    "publicsuffixlist>=1.1.2.20261124",
 ]
 
 [project.optional-dependencies]

@@ -9,7 +9,7 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
 
-from surety.eval.serve_collect import serve_and_collect
+from surety.eval.serve_collect import read_files, score_plan, serve_and_collect
 
 ROOT = Path(__file__).resolve().parents[1]
 AP, EG = "action_prediction", "element_grounding"
@@ -136,3 +136,24 @@ def test_serve_and_collect_stops_the_server_when_collection_fails(tmp_path):
         serve_and_collect(_server(tmp_path, port, "x"), port, [sys.executable, "-c", "raise SystemExit(2)"],
                           expect_run="x", poll=0.1, ready_timeout=60)
     assert _down(port)
+
+
+def test_score_plan_returns_its_files_resumes_and_refuses_another_run_or_plan(tmp_path):
+    root, out = _webjev(tmp_path), tmp_path / "scores" / "m2-x"
+    plan = json.dumps({"cal": ["ap1"], "test_in": [], "test_shift": ["eg1"]})
+    script = str(ROOT / "scripts" / "offline_collect.py")
+
+    def run(run_id, plan_text, served=None):
+        port = _port()
+        return score_plan(out, run_id, plan_text, _server(tmp_path, port, served or run_id), script, str(root), port,
+                          ["--n-perm", "3"], poll=0.1, ready_timeout=60)
+
+    files = run("/out/a", plan)
+    assert set(files) == {"meta.json", "plan.json", "rows.jsonl", "serve.log", "server.json"}
+    assert len(files["rows.jsonl"].splitlines()) == 2 and json.loads(files["server.json"])["run"] == "/out/a"
+    assert run("/out/a", plan)["rows.jsonl"] == files["rows.jsonl"]   # resumed: nothing re-scored or duplicated
+    with pytest.raises(ValueError, match="new name"):
+        run("/out/b", plan)
+    with pytest.raises(ValueError, match="new name"):
+        run("/out/a", json.dumps({"cal": ["ap1"], "test_in": [], "test_shift": []}))
+    assert read_files(out)["rows.jsonl"] == files["rows.jsonl"]

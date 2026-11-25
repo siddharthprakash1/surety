@@ -1,11 +1,14 @@
+import hashlib
 import json
 import random
 import re
+from itertools import zip_longest
 from pathlib import Path
-from typing import Literal
+from typing import Callable, Literal
 
 import pyarrow.parquet as pq
 
+from surety.eval.sites import website
 from surety.types import DecisionState, Instance, Option
 
 _COLUMNS = ["id", "task_type", "question_type", "options", "gold", "context", "question", "num_tokens",
@@ -70,22 +73,32 @@ def draw_balanced(pools: list[list[str]], n: int) -> list[str]:
     return out
 
 
-def site_split3(instances, cal_frac: float, test_frac: float,
-                seed: int = 0) -> tuple[set[str], set[str], set[str]]:
-    """(train, cal, held) sites for a fine-tuned executor, which then never trains on a calibration or test site."""
-    sites = sorted({i.site for i in instances})
-    random.Random(seed).shuffle(sites)
-    n_cal, n_held = round(len(sites) * cal_frac), round(len(sites) * test_frac)
-    return set(sites[n_cal + n_held:]), set(sites[:n_cal]), set(sites[n_cal:n_cal + n_held])
+def plan_digest(plan: dict) -> str:
+    """sha256 of a plan's canonical JSON: names the plan a training file or a scoring run was made from."""
+    return hashlib.sha256(json.dumps(plan, sort_keys=True).encode()).hexdigest()
 
 
-def draw_spread(instances, sites, n: int, rng: random.Random) -> list[str]:
-    """n ids from `sites`, task types alternating as in draw_balanced; each type is drawn one site at a time (every site
-    gives one step of a type before any gives two), so no site dominates the draw."""
+def site_split3(instances, cal_frac: float, test_frac: float, seed: int = 0,
+                key: Callable[[str], str] = website) -> tuple[set[str], set[str], set[str]]:
+    """(train, cal, held) hosts for a fine-tuned executor, split by website (`key`), so that it never trains on a website
+    it is calibrated or tested on: de.wikipedia.org in training and en.wikipedia.org in test would leak."""
+    groups: dict[str, set[str]] = {}
+    for i in instances:
+        groups.setdefault(key(i.site), set()).add(i.site)
+    order = sorted(groups)
+    random.Random(seed).shuffle(order)
+    n_cal, n_held = round(len(order) * cal_frac), round(len(order) * test_frac)
+    hosts = lambda ks: {h for k in ks for h in groups[k]}
+    return hosts(order[n_cal + n_held:]), hosts(order[:n_cal]), hosts(order[n_cal:n_cal + n_held])
+
+
+def draw_spread(instances, sites, n: int, rng: random.Random, key: Callable[[str], str] = website) -> list[str]:
+    """n ids from the hosts in `sites`, task types alternating as in draw_balanced; each type is drawn one website at a
+    time (every website gives one step of a type before any gives two), so no website dominates the draw."""
     by_type: dict[str, dict[str, list[str]]] = {}
     for i in instances:
         if i.site in sites:
-            by_type.setdefault(i.task_type, {}).setdefault(i.site, []).append(i.id)
+            by_type.setdefault(i.task_type, {}).setdefault(key(i.site), []).append(i.id)
     pools = []
     for _, per_site in sorted(by_type.items()):
         order = sorted(per_site)
@@ -97,27 +110,34 @@ def draw_spread(instances, sites, n: int, rng: random.Random) -> list[str]:
 
 
 def make_spread_plan(instances, cal_sites, held_sites, n_cal: int, n_test_in: int, n_test_shift: int,
-                     seed: int = 0) -> dict[str, list[str]]:
-    """make_plan with every split spread over its sites (draw_spread). cal and test_in are one draw cut at random within
-    each task type, so the two stay exchangeable and balanced."""
+                     seed: int = 0, key: Callable[[str], str] = website) -> dict[str, list[str]]:
+    """make_plan with every split spread over its websites (draw_spread). cal and test_in are one draw cut at random
+    within each task type, so the two stay exchangeable; every split alternates task types, as make_plan's do, so a
+    --limit or an interrupted collection keeps the balance."""
     rng = random.Random(seed)
-    inner = draw_spread(instances, cal_sites, n_cal + n_test_in, rng)
+    inner = draw_spread(instances, cal_sites, n_cal + n_test_in, rng, key)
     type_of = {i.id: i.task_type for i in instances}
     by_type: dict[str, list[str]] = {}
     for i in inner:
         by_type.setdefault(type_of[i], []).append(i)
     share = n_cal / max(n_cal + n_test_in, 1)
     target = round(len(inner) * share)
-    cal: list[str] = []
-    test_in: list[str] = []
+    cal: list[list[str]] = []
+    test_in: list[list[str]] = []
     groups = sorted(by_type.items())
     for k, (_, ids) in enumerate(groups):
         rng.shuffle(ids)
-        cut = target - len(cal) if k == len(groups) - 1 else round(len(ids) * share)
+        taken = sum(map(len, cal))
+        cut = target - taken if k == len(groups) - 1 else round(len(ids) * share)
         cut = min(max(cut, 0), len(ids))
-        cal += ids[:cut]
-        test_in += ids[cut:]
-    return {"cal": cal, "test_in": test_in, "test_shift": draw_spread(instances, held_sites, n_test_shift, rng)}
+        cal.append(ids[:cut])
+        test_in.append(ids[cut:])
+
+    def interleave(parts: list[list[str]]) -> list[str]:
+        return [i for row in zip_longest(*parts) for i in row if i is not None]
+
+    return {"cal": interleave(cal), "test_in": interleave(test_in),
+            "test_shift": draw_spread(instances, held_sites, n_test_shift, rng, key)}
 
 
 def option_id_and_label(option: str, task_type: str) -> tuple[str, str]:

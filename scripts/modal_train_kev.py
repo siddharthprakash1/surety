@@ -3,12 +3,16 @@
 Kev's kev-finetune skill keeps kev.train's 384-token state default, which drops ~94% of WebJev records; this passes
 --max_state 7552 (the released Kev-4B training length) with the recipe of scripts/train_kev.sh.
 
-    uv run python scripts/make_kev_train.py --plan artifacts/m2/plan.json   # runs/kev_ft/{train,heldout}.jsonl, M2 training sites
+    uv run python scripts/make_kev_train.py                     # runs/kev_ft/{train,heldout}.jsonl from M2's training sites
     uvx modal setup                                             # once; H100s need a payment method on the workspace
     uvx --from modal==1.5.5 modal run scripts/modal_train_kev.py --max-steps 5          # smoke: a few minutes
-    uvx --from modal==1.5.5 modal run scripts/modal_train_kev.py --name webjev-v1       # full: 2 epochs, ~1-2 GPU h; names must be new
-Then score it where it lies, on the surety-kev-ft volume: scripts/modal_score_kev.py --run webjev-v1 --plan artifacts/m2/plan.json.
+    uvx --from modal==1.5.5 modal run --detach scripts/modal_train_kev.py --name webjev-v1   # full: 2 epochs, ~1-2 GPU h
+Names must be new. --detach keeps the run going if this laptop sleeps or disconnects (a LoRA run cannot resume).
+The launcher refuses training data not built from artifacts/m2/plan.json. Then score the run where it lies, on the
+surety-kev-ft volume: scripts/modal_score_kev.py --run webjev-v1 --plan artifacts/m2/plan.json.
 """
+import hashlib
+import json
 import os
 import subprocess
 import sys
@@ -51,6 +55,12 @@ def train(name: str, extra: list[str]) -> None:
 def main(name: str = "", max_steps: int = 0) -> None:
     if not (DATA / "train.jsonl").exists():
         sys.exit("run scripts/make_kev_train.py first")
+    stats = json.loads((DATA / "stats.json").read_text()) if (DATA / "stats.json").exists() else {}
+    m2 = json.loads((ROOT / "artifacts" / "m2" / "plan.json").read_text())
+    if stats.get("plan_sha256") != hashlib.sha256(json.dumps(m2, sort_keys=True).encode()).hexdigest():  # webjev.plan_digest
+        sys.exit("runs/kev_ft was not built from artifacts/m2/plan.json (a fine-tune on M1's plan would train on its "
+                 "calibration sites): run scripts/make_kev_train.py --plan artifacts/m2/plan.json")
     name = name or f"{'smoke' if max_steps else 'webjev'}-{time.strftime('%Y%m%d-%H%M%S')}"  # kev.train refuses an existing --out
     train.remote(name, ["--max_steps", str(max_steps)] if max_steps else [])
-    print(f"done: uvx --from modal==1.5.5 modal volume get surety-kev-ft {name} runs/kev_ft/{name}")
+    print(f"done: /out/{name} on the surety-kev-ft volume. Score it there: uvx --from modal==1.5.5 modal run --detach "
+          f"scripts/modal_score_kev.py --run {name} --plan artifacts/m2/plan.json --name m2-{name}")

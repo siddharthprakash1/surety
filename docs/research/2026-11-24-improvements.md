@@ -356,9 +356,9 @@ From §2's first three recommendations: `src/surety/gate/learned.py` (`LearnedRi
    extra action-prediction picks on new sites (static gates overshoot there; adaptive gates hold ε and keep little
    of the gain). See `docs/results/m1.md` and `results/m1/kev_compact_prior.md`. Calibration data from more sites
    is the other half of this item: an accuracy gain only becomes safe automation if the gate's calibration
-   transfers to the sites it is deployed on. *Prepared 2026-11-25 (not run):* plan M2 with site-disjoint training,
-   calibration and test sites, each split spread over its sites; training data from M2's training sites; a Modal job
-   that scores a checkpoint where it was trained (handover 2026-11-24, last addendum).
+   transfers to the sites it is deployed on. *Prepared 2026-11-25 (not run):* plan M2 with disjoint training,
+   calibration and test websites, each split spread over its websites; training data from M2's training websites; a
+   Modal job that scores a checkpoint where it was trained (handover 2026-11-24, last addendum).
 2. **H4 with the learned gates.** Run `--systems ...,learned,alearned` next to arisk. This confirms on new data the
    choices made in-sample here: features, γ, margin.
 3. **Two-tier critical detector.** Cheap high-recall keywords, then an LLM judge on the flagged steps (§4.3).

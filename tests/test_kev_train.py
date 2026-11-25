@@ -75,6 +75,17 @@ def test_build_records_trains_only_on_a_spread_plans_train_sites():
     assert {site_of[i] for i in _ids(train)} == {"t1.com", "t2.com"} and len(train) == 16 and heldout == []
 
 
+def test_build_records_holds_out_whole_websites_on_a_spread_plan():
+    hosts = [f"{h}.w{s}.com" for s in range(6) for h in ("a", "b")]
+    insts = _pool(hosts, 2)
+    site_of = {i.id: i.site for i in insts}
+    plan = _plan([], []) | {"train_sites": hosts}
+    train, heldout = build_records(insts, plan, n_train=100, n_heldout=8, seed=0, heldout_site_cap=4)
+    websites = lambda rs: {site_of[i].split(".", 1)[1] for i in _ids(rs)}
+    assert len(heldout) == 8 and len(websites(heldout)) == 2 and websites(train).isdisjoint(websites(heldout))
+    assert max(Counter(site_of[i].split(".", 1)[1] for i in _ids(heldout)).values()) <= 4
+
+
 def test_build_records_shape_matches_kev_format(tmp_path):
     insts = _pool(["a.com", "b.com"], 3)
     train, heldout = build_records(insts, _plan(["a.com", "b.com"], []), n_train=4, n_heldout=2, seed=0)

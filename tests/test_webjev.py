@@ -205,3 +205,32 @@ def test_make_spread_plan_splits_balanced_disjoint_and_spread():
     assert plan != make_spread_plan(insts, cal_sites, held, 30, 20, 16, seed=1)
     short = make_spread_plan(insts, set(sorted(cal_sites)[:1]), held, n_cal=12, n_test_in=8, n_test_shift=0)
     assert (len(short["cal"]), len(short["test_in"])) == (7, 5)   # 12 steps on the one site, cut 60/40
+    for split in ("cal", "test_in", "test_shift"):   # types alternate, so a --limit keeps the balance
+        types = [by_id[i].task_type for i in plan[split]]
+        assert len(set(types[0::2])) == 1 and len(set(types[1::2])) == 1 and types[0] != types[1]
+
+
+def _hosts(n_sites, hosts_per_site, per_host, types=(AP, EG)):
+    return [Instance(f"{t}-{h}-{s}-{k}", f"h{h}.site{s}.com", t, "q", ["A: a"], 0, "", "", 0, "text")
+            for t in types for s in range(n_sites) for h in range(hosts_per_site) for k in range(per_host)]
+
+
+def test_site_split3_keeps_each_websites_hosts_together():
+    insts = _hosts(20, 3, 1)
+    train, cal, held = site_split3(insts, 0.25, 0.25, seed=0)
+    assert (len(train), len(cal), len(held)) == (30, 15, 15)
+    group_of = {h: g for g, hosts in (("train", train), ("cal", cal), ("held", held)) for h in hosts}
+    for s in range(20):
+        assert len({group_of[f"h{h}.site{s}.com"] for h in range(3)}) == 1
+    assert site_split3(insts, 0.25, 0.25, seed=0, key=lambda h: h) != (train, cal, held)   # by host, they scatter
+
+
+def test_draw_spread_spreads_over_websites_not_hosts():
+    wiki = [Instance(f"{t}-{lang}", f"{lang}.wikipedia.org", t, "q", ["A: a"], 0, "", "", 0, "text")
+            for t in (AP, EG) for lang in ("en", "de", "fr", "es", "it", "pt", "nl", "pl", "sv", "ja", "zh", "ru")]
+    insts = _synthetic(10, 2) + wiki
+    by_id = {i.id: i for i in insts}
+    drawn = draw_spread(insts, {i.site for i in insts}, 22, random.Random(0))
+    assert sum(by_id[i].site.endswith("wikipedia.org") for i in drawn) == 2   # one step of each type, as any website
+    by_host = draw_spread(insts, {i.site for i in insts}, 22, random.Random(0), key=lambda h: h)
+    assert sum(by_id[i].site.endswith("wikipedia.org") for i in by_host) > 2
