@@ -67,6 +67,14 @@ def test_build_records_heldout_sites_disjoint_from_train_sites():
     assert max(Counter(site_of[i] for i in _ids(heldout)).values()) <= 3
 
 
+def test_build_records_trains_only_on_a_spread_plans_train_sites():
+    insts = _pool(["t1.com", "t2.com", "c.com", "h.com"], 4)
+    site_of = {i.id: i.site for i in insts}
+    plan = _plan(["c.com"], ["h.com"]) | {"train_sites": ["t1.com", "t2.com"]}
+    train, heldout = build_records(insts, plan, n_train=100, n_heldout=0, seed=0)
+    assert {site_of[i] for i in _ids(train)} == {"t1.com", "t2.com"} and len(train) == 16 and heldout == []
+
+
 def test_build_records_shape_matches_kev_format(tmp_path):
     insts = _pool(["a.com", "b.com"], 3)
     train, heldout = build_records(insts, _plan(["a.com", "b.com"], []), n_train=4, n_heldout=2, seed=0)

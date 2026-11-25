@@ -12,3 +12,4 @@ results/**/*.png
 .claude/
 
 !artifacts/m1/*.jsonl
+!artifacts/m2/*.jsonl

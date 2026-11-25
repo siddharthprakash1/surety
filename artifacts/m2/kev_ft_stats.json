@@ -1,0 +1,44 @@
+{
+  "args": {
+    "root": "data/webjev",
+    "plan": "artifacts/m2/plan.json",
+    "n_train": 8000,
+    "n_heldout": 500,
+    "seed": 0,
+    "max_options": 64,
+    "out_dir": "runs/kev_ft"
+  },
+  "train_sites": 615,
+  "heldout_sites": 31,
+  "shared_sites": 0,
+  "train": {
+    "n": 8000,
+    "shortfall": 0,
+    "by_task_type": {
+      "action": 4000,
+      "element": 4000
+    },
+    "mean_state_chars": 3476.0,
+    "options": {
+      "p50": 9.0,
+      "p90": 64.0,
+      "p99": 64.0,
+      "max": 64
+    }
+  },
+  "heldout": {
+    "n": 500,
+    "shortfall": 0,
+    "by_task_type": {
+      "action": 269,
+      "element": 231
+    },
+    "mean_state_chars": 3183.4,
+    "options": {
+      "p50": 8.5,
+      "p90": 57.5,
+      "p99": 64.0,
+      "max": 64
+    }
+  }
+}

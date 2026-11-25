@@ -3,12 +3,11 @@
 Kev's kev-finetune skill keeps kev.train's 384-token state default, which drops ~94% of WebJev records; this passes
 --max_state 7552 (the released Kev-4B training length) with the recipe of scripts/train_kev.sh.
 
-    uv run python scripts/make_kev_train.py                     # runs/kev_ft/{train,heldout}.jsonl
+    uv run python scripts/make_kev_train.py --plan artifacts/m2/plan.json   # runs/kev_ft/{train,heldout}.jsonl, M2 training sites
     uvx modal setup                                             # once; H100s need a payment method on the workspace
     uvx --from modal==1.5.5 modal run scripts/modal_train_kev.py --max-steps 5          # smoke: a few minutes
-    uvx --from modal==1.5.5 modal run scripts/modal_train_kev.py --name webjev-v1       # full: 2 epochs, ~1-2 GPU h
-    uvx --from modal==1.5.5 modal volume get surety-kev-ft webjev-v1 runs/kev_ft/webjev-v1  # names must be new
-Then serve runs/kev_ft/webjev-v1 with kev.serve and re-run scripts/offline_collect.py on artifacts/m1/plan.json.
+    uvx --from modal==1.5.5 modal run scripts/modal_train_kev.py --name webjev-v1       # full: 2 epochs, ~1-2 GPU h; names must be new
+Then score it where it lies, on the surety-kev-ft volume: scripts/modal_score_kev.py --run webjev-v1 --plan artifacts/m2/plan.json.
 """
 import os
 import subprocess

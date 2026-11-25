@@ -141,3 +141,23 @@ would automate 51 % at ε = 0.05, the PAC gate 27 %). The cheapest lever, an eig
 
 Also: on GitHub, `main` and this branch were rewritten overnight (identical files; the early commits' author email
 changed). The local branches now follow the rewritten history, and new commits build on it.
+
+## Addendum 2026-11-25 (later): fine-tune prep
+
+The owner chose the Kev-4B fine-tune as the next step and is setting up Modal. Ready, not run:
+
+- **Plan M2** (`artifacts/m2/plan.json`, `make_plan.py --design spread`): training, calibration and test sites are
+  disjoint (721 / 361 / 361), and each split is spread over its sites (at most 4 steps a site; cal spans 316 sites,
+  test_shift 354). On M1's plan a fine-tuned Kev would be calibrated on its own training sites (549 of 600 cal steps),
+  and the prior-correction result shows that calibration on one set of sites over-promises on others.
+- **Training data** rebuilt from M2's training sites (`artifacts/m2/kev_ft_stats.json`): 8,000 / 500 steps from 615 /
+  31 sites. BLOCKED is the gold answer on 1.2 % of its action steps.
+- **Scoring job** `scripts/modal_score_kev.py`: kev.serve and offline_collect in one container on the `surety-kev-ft`
+  volume, so a checkpoint is scored where it was trained. It refuses a server that runs anything but the requested
+  checkpoint (kev.serve otherwise falls back silently). Tested locally against a stand-in server
+  (`tests/test_serve_collect.py`); both Modal launchers load and parse their options with modal 1.5.5; nothing has
+  run on Modal.
+- **Parity check** `scripts/score_parity.py`: re-score 100 of M1's steps zero-shot first and compare with M1's rows.
+
+Order once Modal works: smoke train, parity, full train, zero-shot and fine-tuned re-scores on M2, then the offline
+analyses on M2's rows. `uv run pytest -q`: 364 passed, 2 skipped.

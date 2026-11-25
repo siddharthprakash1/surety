@@ -1,4 +1,5 @@
 import json
+import random
 from collections import Counter
 
 import pyarrow as pa
@@ -7,10 +8,13 @@ import pytest
 
 from surety.eval.webjev import (
     compile_instance,
+    draw_spread,
     load_instances,
     make_plan,
+    make_spread_plan,
     option_id_and_label,
     site_split,
+    site_split3,
 )
 from surety.types import Instance
 
@@ -160,3 +164,44 @@ def test_make_plan_fills_from_other_type_when_short():
     plan = make_plan(insts, {i.site for i in insts}, set(), n_cal=10, n_test_in=0, n_test_shift=4)
     assert Counter(i.split("-")[0] for i in plan["cal"]) == {AP: 7, EG: 3}
     assert plan["test_shift"] == []
+
+
+def test_site_split3_is_disjoint_and_seeded():
+    insts = _synthetic(20, 2)
+    train, cal, held = site_split3(insts, 0.25, 0.25, seed=0)
+    assert (len(train), len(cal), len(held)) == (10, 5, 5)
+    assert not (train & cal or train & held or cal & held) and train | cal | held == {i.site for i in insts}
+    assert site_split3(list(reversed(insts)), 0.25, 0.25, seed=0) == (train, cal, held)
+    assert site_split3(insts, 0.25, 0.25, seed=1) != (train, cal, held)
+
+
+def test_draw_spread_takes_a_step_from_every_site_before_a_second():
+    big = [Instance(f"{t}-big-{k}", "big.com", t, "q", ["A: a"], 0, "", "", 0, "text") for t in (AP, EG) for k in range(50)]
+    insts = _synthetic(10, 2) + big
+    by_id = {i.id: i for i in insts}
+    sites = {i.site for i in insts}
+    for n, per_site in [(22, 1), (44, 2)]:
+        drawn = draw_spread(insts, sites, n, random.Random(0))
+        assert Counter(by_id[i].task_type for i in drawn) == {AP: n // 2, EG: n // 2}
+        assert set(Counter((by_id[i].site, by_id[i].task_type) for i in drawn).values()) == {per_site}
+    drawn = draw_spread(insts, sites, 60, random.Random(0))
+    assert Counter(by_id[i].site for i in drawn)["big.com"] == 20   # small sites give their 2 + 2, big.com the rest
+    assert draw_spread(list(reversed(insts)), sites, 44, random.Random(0)) == draw_spread(insts, sites, 44, random.Random(0))
+
+
+def test_make_spread_plan_splits_balanced_disjoint_and_spread():
+    insts = _synthetic(30, 6)
+    by_id = {i.id: i for i in insts}
+    train, cal_sites, held = site_split3(insts, 0.4, 0.3)
+    plan = make_spread_plan(insts, cal_sites, held, n_cal=30, n_test_in=20, n_test_shift=16)
+    for split, n in [("cal", 30), ("test_in", 20), ("test_shift", 16)]:
+        assert Counter(by_id[i].task_type for i in plan[split]) == {AP: n // 2, EG: n // 2}
+    assert not set(plan["cal"]) & set(plan["test_in"])
+    assert all(by_id[i].site in cal_sites for i in plan["cal"] + plan["test_in"])
+    assert all(by_id[i].site in held for i in plan["test_shift"])
+    assert max(Counter((by_id[i].site, by_id[i].task_type) for i in plan["test_shift"]).values()) == 1
+    assert max(Counter((by_id[i].site, by_id[i].task_type) for i in plan["cal"] + plan["test_in"]).values()) == 3
+    assert plan == make_spread_plan(list(reversed(insts)), cal_sites, held, 30, 20, 16)
+    assert plan != make_spread_plan(insts, cal_sites, held, 30, 20, 16, seed=1)
+    short = make_spread_plan(insts, set(sorted(cal_sites)[:1]), held, n_cal=12, n_test_in=8, n_test_shift=0)
+    assert (len(short["cal"]), len(short["test_in"])) == (7, 5)   # 12 steps on the one site, cut 60/40

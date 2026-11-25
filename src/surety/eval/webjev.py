@@ -70,6 +70,56 @@ def draw_balanced(pools: list[list[str]], n: int) -> list[str]:
     return out
 
 
+def site_split3(instances, cal_frac: float, test_frac: float,
+                seed: int = 0) -> tuple[set[str], set[str], set[str]]:
+    """(train, cal, held) sites for a fine-tuned executor, which then never trains on a calibration or test site."""
+    sites = sorted({i.site for i in instances})
+    random.Random(seed).shuffle(sites)
+    n_cal, n_held = round(len(sites) * cal_frac), round(len(sites) * test_frac)
+    return set(sites[n_cal + n_held:]), set(sites[:n_cal]), set(sites[n_cal:n_cal + n_held])
+
+
+def draw_spread(instances, sites, n: int, rng: random.Random) -> list[str]:
+    """n ids from `sites`, task types alternating as in draw_balanced; each type is drawn one site at a time (every site
+    gives one step of a type before any gives two), so no site dominates the draw."""
+    by_type: dict[str, dict[str, list[str]]] = {}
+    for i in instances:
+        if i.site in sites:
+            by_type.setdefault(i.task_type, {}).setdefault(i.site, []).append(i.id)
+    pools = []
+    for _, per_site in sorted(by_type.items()):
+        order = sorted(per_site)
+        rng.shuffle(order)
+        queues = [rng.sample(sorted(per_site[s]), len(per_site[s])) for s in order]
+        layers = [q[d] for d in range(max(map(len, queues))) for q in queues if d < len(q)]
+        pools.append(layers[::-1])   # draw_balanced pops from the end
+    return draw_balanced(pools, n)
+
+
+def make_spread_plan(instances, cal_sites, held_sites, n_cal: int, n_test_in: int, n_test_shift: int,
+                     seed: int = 0) -> dict[str, list[str]]:
+    """make_plan with every split spread over its sites (draw_spread). cal and test_in are one draw cut at random within
+    each task type, so the two stay exchangeable and balanced."""
+    rng = random.Random(seed)
+    inner = draw_spread(instances, cal_sites, n_cal + n_test_in, rng)
+    type_of = {i.id: i.task_type for i in instances}
+    by_type: dict[str, list[str]] = {}
+    for i in inner:
+        by_type.setdefault(type_of[i], []).append(i)
+    share = n_cal / max(n_cal + n_test_in, 1)
+    target = round(len(inner) * share)
+    cal: list[str] = []
+    test_in: list[str] = []
+    groups = sorted(by_type.items())
+    for k, (_, ids) in enumerate(groups):
+        rng.shuffle(ids)
+        cut = target - len(cal) if k == len(groups) - 1 else round(len(ids) * share)
+        cut = min(max(cut, 0), len(ids))
+        cal += ids[:cut]
+        test_in += ids[cut:]
+    return {"cal": cal, "test_in": test_in, "test_shift": draw_spread(instances, held_sites, n_test_shift, rng)}
+
+
 def option_id_and_label(option: str, task_type: str) -> tuple[str, str]:
     if task_type == "element_grounding" and (m := _EG_OPTION.fullmatch(option)):
         j = json.loads(m.group(3))

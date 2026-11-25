@@ -10,7 +10,8 @@ QID = {"action_prediction": "action", "element_grounding": "element"}
 
 def build_records(instances: list[Instance], plan: dict, n_train: int, n_heldout: int, seed: int,
                   max_options: int = 64, heldout_site_cap: int = 60) -> tuple[list[dict], list[dict]]:
-    sites = set(plan["cal_sites"]) - set(plan["held_sites"])
+    # a spread (M2) plan names its training sites; an M1 plan trains on its calibration sites, minus the plan's own steps
+    sites = set(plan["train_sites"]) if "train_sites" in plan else set(plan["cal_sites"]) - set(plan["held_sites"])
     excluded = set(plan["cal"]) | set(plan["test_in"]) | set(plan["test_shift"])
     by_site: dict[str, list[Instance]] = {}
     for i in instances:

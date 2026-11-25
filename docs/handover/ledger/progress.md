@@ -195,3 +195,9 @@ Pushed: branch overnight-2026-11-16 to origin on the owner's instruction (2026-1
 Local main and overnight-2026-11-16 reset to the rewritten origin history (same trees; the early commits' author email was changed on GitHub overnight) — cost if wrong: none, the old hashes remain in the reflog.
 Ruling: PriorCorrector fits one offset per recurring action id, page-element ids (E12, clickable_12, bid:12, e12) excluded, L2 1.0 fixed before looking at results, damped Newton — cost if wrong: a slightly weaker correction than an unpenalised fit (held-out action-prediction accuracy 0.570 vs 0.59 unpenalised).
 Ruling: the correction is not a default anywhere (offline analysis only; live MiniWoB ids are page elements, so it would be a no-op there): on held-out sites the static gates overshoot ε with it and adaptive gates keep little of its gain — cost if wrong: ~4–9 points of automation on calibration-like sites left unused.
+
+## 2026-11-25 (fine-tune prep, while the owner sets up Modal)
+
+Ruling: the fine-tuned Kev trains on and is scored with a new plan, M2 (`artifacts/m2/plan.json`): disjoint training / calibration / test sites (721 / 361 / 361, seed 0), every split spread over its sites (`draw_spread`, at most 4 steps a site). Why: 549 of M1's 600 cal steps sit on sites M1's training file draws from, and M1's top 10 sites hold 36–41 % of each split — cost if wrong: fine-tuned rows are not comparable row for row with M1's; the zero-shot re-score on M2 is the baseline instead.
+Ruling: the training file is rebuilt from M2's training sites (8,000 / 500 steps from 615 / 31 sites; 771 / 27 on 2026-11-16), recipe unchanged — cost if wrong: about a fifth fewer training sites.
+Ruling: scoring runs kev.serve and offline_collect in one Modal container on the training volume (`scripts/modal_score_kev.py`), after a 100-step parity check against M1's rows — cost if wrong: one short wasted GPU run.
