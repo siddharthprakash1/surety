@@ -141,7 +141,10 @@ expert losses was 83 % over, and decaying steps gave no gain.
    Ville's inequality [O18] on the audited-error likelihood ratio gives an anytime version, looser still.
 3. **Raise r, or audit by predicted risk with a floor** (active, anytime-valid RCPS [O9]): the required margin scales
    as √((1 − r)/r), so targeting audits at steps the error model doubts buys the most per supervisor call. Needs the
-   runner to take a per-step audit probability.
+   runner to take a per-step audit probability. *Measured 2026-11-25 (offline, `results/m1/kev_compact_audits.md`):*
+   q ∝ √(ê(1 − ê)) at the same budget buys little on M1. With a margin chosen on calibration-site streams, alearned
+   automates 0.281 vs 0.267 at ε = 0.05 (6.5 % vs 9 % of held-out streams over ε) and gains nothing at ε = 0.1.
+   Acted steps are uniformly low-risk, so the best-case variance cut is ~10 %.
 4. Keep ACI / rolling RC on importance-weighted feedback as the inner controller, γ ≈ 0.005–0.02 [O6, O1].
 5. Decaying steps reset at site boundaries [O4]: smoother α, no exceedance gain in the toy.
 
@@ -366,7 +369,8 @@ From §2's first three recommendations: `src/surety/gate/learned.py` (`LearnedRi
    - Add the consent, subscription, permission / API-key and download categories.
    - Owner's decision.
 4. **Audit by predicted risk with a floor** (§3.3). It is the cheapest way to shrink the margin. Needs a per-step
-   audit probability in the runner.
+   audit probability in the runner. *Measured offline 2026-11-25: a small gain at ε = 0.05 and none at 0.1 (§3,
+   recommendation 3); not wired live. Worth re-measuring after the fine-tune.*
 5. **An optional barrier mode** for deployments that need a per-stream bound with a known horizon, with a higher
    audit rate.
 6. **H3 with a stronger supervisor and `--json`** (owner's key). Add supervisor hardening: datamark page text, never

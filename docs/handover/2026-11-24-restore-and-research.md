@@ -174,3 +174,13 @@ The owner chose the Kev-4B fine-tune as the next step and is setting up Modal. R
 
 Order once Modal works: smoke train, parity, full train, zero-shot and fine-tuned re-scores on M2, then the offline
 analyses on M2's rows. `uv run pytest -q`: 379 passed, 2 skipped.
+
+## Addendum 2026-11-25 (last): risk-targeted audits
+
+Asked to try the roadmap's audit item while Modal is set up. `surety.gate.audit.AuditPolicy` audits an acted step with
+probability ∝ √(predicted error variance) at the same budget; `scripts/offline_audits.py` compares it with uniform
+audits on M1's held-out streams (and with uniform audits at its realised rate, for equal cost), choosing floor and
+margin on calibration-site streams only (`results/m1/kev_compact_audits.md`). Result: a small gain at ε = 0.05
+(alearned 0.281 vs 0.267 automation, 6.5 % vs 9 % of streams over ε) and none at ε = 0.1. Acted steps are uniformly
+low-risk, so the best possible variance cut is ~10 %. Not wired into the live runner; re-measure after the fine-tune.
+`uv run pytest -q`: 385 passed, 2 skipped.

@@ -204,3 +204,8 @@ Ruling: the training file is rebuilt from M2's training websites (8,000 / 500 st
 Ruling: scoring runs kev.serve and offline_collect in one Modal container on the training volume (`scripts/modal_score_kev.py`), after a 100-step parity check against M1's rows; a score directory is tied to one checkpoint and plan — cost if wrong: one short wasted GPU run.
 Review (independent agent, first version of the prep): 7 findings, all fixed: host-level split leaked 221 of 1,600 cal/test steps onto training websites; misplaced `modal volume get`; resume across checkpoints; cal/test_in grouped by type; no plan check on the training file; no `--detach`; fine-tuned head at T = 1.0 (documented; the gates refit T).
 Ruling: M1 stays as published, with a caveat: it holds out hosts, and 89 of its 600 test_shift steps share a website with calibration hosts (report §6) — cost if wrong: M1's held-out-site numbers are somewhat optimistic.
+
+## 2026-11-25 (risk-targeted audits)
+
+Ruling: targeted audits use the Neyman allocation q ∝ √v(ê), v = ê(1 − ê) for doubly-robust feedback or ê for importance weighting, scaled to the budget on the calibration steps the gate acts on and clipped to [floor, 1]; floor and margin are chosen on calibration-site streams only (`scripts/offline_audits.py`) — cost if wrong: none for published numbers (offline option).
+Ruling: not wired into the live runner: at the same budget it gains 1.4 points of automation at ε = 0.05 (κ 0.15: 0.281 vs 0.267, 6.5 % vs 9 % of held-out streams over ε) and nothing at ε = 0.1, because acted steps are uniformly low-risk (best-case variance cut 10 %) — cost if wrong: about a point of automation at ε = 0.05 left unused in H4; re-measure after the fine-tune.
