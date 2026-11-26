@@ -15,3 +15,9 @@ class Trace:
 
     def close(self) -> None:
         self.f.close()
+
+    def __enter__(self) -> "Trace":
+        return self
+
+    def __exit__(self, exc_type, exc, tb) -> None:
+        self.close()
