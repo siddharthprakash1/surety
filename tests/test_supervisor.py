@@ -1,5 +1,8 @@
 import json
 
+import httpx
+import pytest
+
 from surety.supervise import MockSupervisor, Supervisor
 from surety.types import DecisionState, Option
 
@@ -128,3 +131,31 @@ def test_mock_supervisor_slots_and_candidates():
     assert m.slot_value(_state(), "b2")[0] == "x" and m.slot_value(_state(), "a1")[0] is None
     m.choose(_state(), ["a1"])
     assert m.candidates == [["a1"]] and m.calls == 3
+
+
+@pytest.mark.parametrize(
+    "status, reply, candidates, expected",
+    [
+        (200, "E12", None, "E12"),
+        (200, "E1", None, "E1"),
+        (200, "E1.", None, "E1"),
+        (200, "answer: E1, done", None, "E1"),
+        (200, "-E1", None, "E1"),
+        (200, "NONE, not a1", None, None),
+        (200, "Z9", None, None),
+        (200, "E1x", None, None),
+        (200, "z9", ["z9", "a1"], None),
+        (500, "E1", None, httpx.HTTPStatusError),
+    ],
+)
+def test_parse_cases(httpx_mock, status, reply, candidates, expected):
+    state = DecisionState("page", "pick", [Option("E1", "One"), Option("E12", "Twelve"), Option("a1", "Alpha")])
+    httpx_mock.add_response(
+        url="http://sup/v1/chat/completions", status_code=status,
+        json={"choices": [{"message": {"content": reply}}]},
+    )
+    if expected is httpx.HTTPStatusError:
+        with pytest.raises(httpx.HTTPStatusError):
+            _sup().choose(state, candidates)
+    else:
+        assert _sup().choose(state, candidates)[0] == expected
