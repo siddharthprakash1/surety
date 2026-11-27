@@ -3,7 +3,7 @@ import argparse
 import pytest
 
 from surety.supervise import MockSupervisor, Supervisor
-from surety.supervise.cli import add_supervisor_args, make_supervisor
+from surety.supervise.cli import add_supervisor_args, make_supervisor, parse_params
 
 
 def _args(*argv):
@@ -30,3 +30,20 @@ def test_unset_key_variable_exits(monkeypatch):
     monkeypatch.delenv("NOPE_KEY", raising=False)
     with pytest.raises(SystemExit):
         make_supervisor(_args("--supervisor-url", "http://s", "--supervisor-api-key-env", "NOPE_KEY"))
+
+
+def test_key_from_dotenv_when_the_variable_is_unset(monkeypatch, tmp_path):
+    monkeypatch.delenv("DOT_KEY", raising=False)
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / ".env").write_text("﻿# keys\nOTHER=x\nexport DOT_KEY='k2'\n", encoding="utf-8")
+    sup = make_supervisor(_args("--supervisor-url", "http://s", "--supervisor-api-key-env", "DOT_KEY"))
+    assert sup.headers == {"Authorization": "Bearer k2"}
+
+
+def test_request_fields_and_max_wait():
+    sup = make_supervisor(_args("--supervisor-url", "http://s", "--supervisor-param", "reasoning_effort=low",
+                                "--supervisor-param", "top_k=5", "--supervisor-max-wait", "60"))
+    assert sup.params == {"reasoning_effort": "low", "top_k": 5} and sup.max_wait == 60
+    assert parse_params(None) is None
+    with pytest.raises(SystemExit):
+        parse_params(["no-equals-sign"])

@@ -6,7 +6,7 @@ import pytest
 from surety.decide import MockBackend
 from surety.env import Element, Page
 from surety.eval.live import h4_table, run_episodes
-from surety.supervise import MockSupervisor
+from surety.supervise import MockSupervisor, RateLimited
 
 
 class OneButton:
@@ -190,3 +190,18 @@ def test_a_failed_episode_leaves_no_trace_on_the_stream(tmp_path):
     assert b[0]["stop"] == "error:EnvClosedError"
     key = lambda r: (r["task"], r["alpha_raw"], r["audit_rng"][1][0], r["audit_stats"])  # noqa: E731
     assert [key(r) for r in b[1:]] == [key(r) for r in a] and a[-1]["audit_stats"][0] > 0
+
+
+class _Capped(MockSupervisor):
+    def choose(self, state, candidate_ids=None):
+        raise RateLimited(3600.0)
+
+
+def test_a_daily_cap_stops_the_run_at_once_and_resume_finishes(tmp_path):
+    out = tmp_path / "h4.jsonl"
+    with pytest.raises(RateLimited):
+        run_episodes(["t1", "t2", "t3"], ["supervisor"], [0], OneButton, MockBackend(_confident), _Capped("e1"), out)
+    assert [(r["task"], r["stop"]) for r in _read(out)] == [("t1", "error:RateLimited")]
+    assert run_episodes(["t1", "t2", "t3"], ["supervisor"], [0], OneButton, MockBackend(_confident),
+                        MockSupervisor("e1"), out) == 3
+    assert [r["task"] for r in _read(out) if r["stop"] == "terminated"] == ["t1", "t2", "t3"]

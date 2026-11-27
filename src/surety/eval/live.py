@@ -16,6 +16,7 @@ from surety.eval.analyze import _table
 from surety.gate import CriticalDetector, CriticalOverride
 from surety.loop import run
 from surety.loop.fit import fit_gate
+from surety.supervise.client import RateLimited
 from surety.trace import Trace
 
 SYSTEMS = {"supervisor": "supervisor", "executor": "executor", "fixed": "fixed:0.7",
@@ -100,6 +101,7 @@ def run_episodes(tasks, systems, seeds, make_env, backend, supervisor, out: Path
                     # a failed episode must leave no trace on the stream: its retry replays the same steps
                     snap = (getattr(gate, "alpha_raw", None), getattr(gate, "audited_errors", None), rng.getstate(),
                             shadow_rng.getstate(), list(stats))
+                    limited = None
                     try:
                         env = make_env(task)
                         trace = Trace(path)
@@ -116,6 +118,7 @@ def run_episodes(tasks, systems, seeds, make_env, backend, supervisor, out: Path
                         errors = 0
                     except Exception as e:  # recorded, retried on resume
                         errors += 1
+                        limited = e if isinstance(e, RateLimited) else None
                         if snap[0] is not None:
                             gate.alpha_raw = snap[0]
                         if snap[1] is not None:
@@ -137,6 +140,8 @@ def run_episodes(tasks, systems, seeds, make_env, backend, supervisor, out: Path
                     f.write(json.dumps(rec) + "\n")
                     f.flush()
                     written += 1
+                    if limited:  # the supervisor's daily cap: every next episode would fail too
+                        raise limited
                     if errors >= MAX_ERRORS:
                         raise RuntimeError(f"{errors} consecutive episodes failed, last: {rec['error']}")
     return written

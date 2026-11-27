@@ -1,6 +1,11 @@
 import json
+import time
 
-from surety.supervise import MockSupervisor, Supervisor
+import httpx
+import pytest
+
+from surety.supervise import MockSupervisor, RateLimited, Supervisor
+from surety.supervise.client import _seconds, _wait_hint
 from surety.types import DecisionState, Option
 
 
@@ -172,3 +177,81 @@ def test_mock_supervisor_slots_and_candidates():
     assert m.slot_value(_state(), "b2")[0] == "x" and m.slot_value(_state(), "a1")[0] is None
     m.choose(_state(), ["a1"])
     assert m.candidates == [["a1"]] and m.calls == 3
+
+
+URL = "http://sup/v1/chat/completions"
+
+
+def _sup_waits(**kw):
+    sup, waits = Supervisor("http://sup", "m", **kw), []
+    sup.sleep = waits.append
+    return sup, waits
+
+
+def test_rate_limit_waits_as_asked_then_answers(httpx_mock):
+    httpx_mock.add_response(url=URL, status_code=429, headers={"retry-after": "7"})
+    httpx_mock.add_response(url=URL, status_code=429, json={"error": {"message": "Please try again in 1m2.5s."}})
+    _reply(httpx_mock, "b2")
+    sup, waits = _sup_waits()
+    assert sup.choose(_state())[0] == "b2" and waits == [7.0, 62.5]
+
+
+def test_daily_cap_stops_without_waiting(httpx_mock):
+    httpx_mock.add_response(url=URL, status_code=429, headers={"retry-after": "3600"})
+    sup, waits = _sup_waits(max_wait=900)
+    with pytest.raises(RateLimited) as e:
+        sup.choose(_state())
+    assert e.value.wait == 3600 and waits == []
+
+
+def test_waits_add_up_to_max_wait(httpx_mock):
+    for _ in range(3):
+        httpx_mock.add_response(url=URL, status_code=429, headers={"retry-after": "400"})
+    sup, waits = _sup_waits(max_wait=900)
+    with pytest.raises(RateLimited):
+        sup.choose(_state())
+    assert waits == [400.0, 400.0]
+
+
+def test_server_errors_retry_then_raise_with_the_endpoint_message(httpx_mock):
+    for _ in range(4):
+        httpx_mock.add_response(url=URL, status_code=503, json={"error": {"message": "busy for org_ab12"}})
+    sup, waits = _sup_waits()
+    with pytest.raises(httpx.HTTPStatusError, match=r"busy for org_\*$"):
+        sup.choose(_state())
+    assert waits == [2.0, 4.0, 8.0]
+
+
+def test_too_large_and_bad_requests_fail_at_once(httpx_mock):
+    too_large = {"error": {"message": "Request too large for model on tokens per minute (TPM): Limit 8000"}}
+    httpx_mock.add_response(url=URL, status_code=413, json=too_large)
+    httpx_mock.add_response(url=URL, status_code=429, json=too_large)
+    httpx_mock.add_response(url=URL, status_code=400, json={"error": {"message": "reasoning_effort unsupported"}})
+    sup, waits = _sup_waits()
+    for pattern in ("413.*Limit 8000", "429.*Limit 8000", "reasoning_effort unsupported"):
+        with pytest.raises(httpx.HTTPStatusError, match=pattern):
+            sup.choose(_state())
+    assert waits == []
+
+
+def test_dropped_connection_is_retried(httpx_mock):
+    httpx_mock.add_exception(httpx.ConnectError("refused"), url=URL)
+    _reply(httpx_mock, "a1", {"prompt_tokens": 5, "completion_tokens": 1})
+    sup, waits = _sup_waits()
+    label, usage = sup.choose(_state())
+    assert (label, usage.prompt_tokens, waits) == ("a1", 5, [2.0])
+
+
+def test_params_join_the_request(httpx_mock):
+    _reply(httpx_mock, "a1")
+    Supervisor("http://sup", "m", params={"reasoning_effort": "low"}).choose(_state())
+    assert json.loads(httpx_mock.get_request().content)["reasoning_effort"] == "low"
+
+
+def test_wait_hints():
+    assert _seconds("1m2.5s") == 62.5 and _seconds("450ms") == pytest.approx(0.45) and _seconds("2h") == 7200
+    assert _seconds("soon") is None
+    assert _wait_hint(httpx.Response(429, headers={"x-ratelimit-reset": "30"})) == 30.0
+    in_2_min = str(int((time.time() + 120) * 1000))
+    assert 100 < _wait_hint(httpx.Response(429, headers={"x-ratelimit-reset": in_2_min})) <= 120
+    assert _wait_hint(httpx.Response(429, text="slow down")) is None

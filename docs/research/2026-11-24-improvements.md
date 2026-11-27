@@ -373,7 +373,8 @@ From §2's first three recommendations: `src/surety/gate/learned.py` (`LearnedRi
    recommendation 3); not wired live. Worth re-measuring after the fine-tune.*
 5. **An optional barrier mode** for deployments that need a per-stream bound with a known horizon, with a higher
    audit rate.
-6. **H3 with a stronger supervisor and `--json`** (owner's key). Add supervisor hardening: datamark page text, never
+6. **H3 with a stronger supervisor and `--json`** (gpt-oss-120b on Groq's free plan, ready since 2026-11-27; needs
+   the owner's free key). Add supervisor hardening: datamark page text, never
    resample (§4.7).
 7. **Log per-ordering probabilities and executor hidden states live.** This enables agreement features and probes
    [19].

@@ -17,8 +17,9 @@ Session: Claude Code on the Windows laptop, overnight 2026-11-24 (IST), while th
 1. **Push: done** (2026-11-24, `origin/overnight-2026-11-16`). Merging it into `main` (a pull request) is the next
    call. The local bundle backup of `main` + this branch stays at
    `C:\Users\DELL\Documents\surety-backups\overnight-2026-11-16.bundle`.
-2. Unchanged from 2026-11-16: a Modal account for the Kev-4B fine-tune, a hosted supervisor key for H3, the
-   keyword decision for the critical detector (now with research behind it, §Research).
+2. Unchanged from 2026-11-16: a Modal account for the Kev-4B fine-tune (its free monthly credit should cover it), a
+   supervisor key for H3 (now a free Groq key, see the 2026-11-27 addendum), the keyword decision for the critical
+   detector (now with research behind it, §Research).
 3. New, optional: whether ε should bound the joint rate P(act ∧ wrong) (today; ~1 in 4–5 autonomous actions may be wrong at ε = 0.05) or the error among acted steps (selective risk; research §2); and whether to adopt the two-tier detector (research §4).
 
 ## Restore: how and what was checked
@@ -184,3 +185,26 @@ margin on calibration-site streams only (`results/m1/kev_compact_audits.md`). Re
 (alearned 0.281 vs 0.267 automation, 6.5 % vs 9 % of streams over ε) and none at ε = 0.1. Acted steps are uniformly
 low-risk, so the best possible variance cut is ~10 %. Not wired into the live runner; re-measure after the fine-tune.
 `uv run pytest -q`: 385 passed, 2 skipped.
+
+## Addendum 2026-11-27: supervisor on free API tiers
+
+The owner has no budget for a paid key, so H3 (and later H4) use free tiers. Groq's free plan (no card) serves
+`openai/gpt-oss-120b`, the larger sibling of the 20b model H3 used, with strict JSON answers; its caps are per model,
+about 200K tokens a day and 8K a minute. Cerebras's trial needs a card; OpenRouter's free list has no gpt-oss and allows
+50 requests a day without a purchase.
+
+- The supervisor client waits out 429s as long as the endpoint asks while one call's waits total at most `--max-wait`
+  (900 s); a longer wait (a daily cap) raises `RateLimited`, which stops `offline_supervisor.py` (exit 75) and
+  `run_h4.py` (after recording the episode for a retry). Re-running the same command resumes. Server errors and dropped
+  connections retry 3 times; "request too large" and other 4xx fail the call at once, with the endpoint's message.
+- `--param KEY=VALUE` / `--supervisor-param` add request fields (`reasoning_effort=low`: Groq takes gpt-oss's level
+  from it, not from the prompt line the 20b run used, which stays so prompts match); `params` joins the resume check.
+- Keys: `--api-key-env NAME` also reads `NAME=value` from a gitignored `.env`, so the owner types the key once.
+- Checked end to end against a local stand-in that rate-limits like Groq: a 1 s wait absorbed, the cap stopped the run
+  at 3/6 calls (exit 75), the re-run finished 6/6; the requests carried the key from `.env`, `reasoning_effort` and
+  strict JSON. Not yet run on Groq (no key yet); the command is in the README (Status).
+- Expected loss: the longest of H3's 200 prompts is ~8.1K tokens (27K characters at the 20b run's 3.3 per token), over
+  the free 8K-a-minute cap, and two more come within 1,024 tokens of it. Expect 1–3 full-list grounding calls to fail
+  as too large; the run lists them and the paired analysis drops those rows (the 20b run lost 5 to Ollama errors).
+
+`uv run pytest -q`: 397 passed, 2 skipped.

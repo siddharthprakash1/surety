@@ -209,3 +209,11 @@ Ruling: M1 stays as published, with a caveat: it holds out hosts, and 89 of its 
 
 Ruling: targeted audits use the Neyman allocation q ∝ √v(ê), v = ê(1 − ê) for doubly-robust feedback or ê for importance weighting, scaled to the budget on the calibration steps the gate acts on and clipped to [floor, 1]; floor and margin are chosen on calibration-site streams only (`scripts/offline_audits.py`) — cost if wrong: none for published numbers (offline option).
 Ruling: not wired into the live runner: at the same budget it gains 1.4 points of automation at ε = 0.05 (κ 0.15: 0.281 vs 0.267, 6.5 % vs 9 % of held-out streams over ε) and nothing at ε = 0.1, because acted steps are uniformly low-risk (best-case variance cut 10 %) — cost if wrong: about a point of automation at ε = 0.05 left unused in H4; re-measure after the fine-tune.
+
+## 2026-11-27 (supervisor on free API tiers)
+
+Ruling: H3's stronger supervisor is gpt-oss-120b on Groq's free plan: no card, same family and prompts as the 20b run, strict JSON by constrained decoding; Cerebras's trial needs a card and OpenRouter's free list has no gpt-oss — cost if wrong: H3 rests on an open-weights supervisor, not the spec's frontier model.
+Ruling: a call waits out 429s while its waits total at most 900 s, else RateLimited stops the run (exit 75) and the same command resumes; server errors and dropped connections retry 3 times; "request too large" and other 4xx fail the call at once — cost if wrong: an unattended run idles up to 15 min per call near the daily cap.
+Ruling: gpt-oss's reasoning level goes to Groq as a request field (`--param reasoning_effort=low`) and the prompt keeps "Reasoning: low"; `params` joins the resume check as None when unset, so earlier files still resume — cost if wrong: none for published numbers.
+Ruling: H3 on Groq keeps the 20b run's max_tokens 1024; its longest prompt (~8.1K tokens) cannot fit the free 8K-a-minute cap and two more come within 1,024 of it, so 1–3 full-list grounding calls are expected to fail as too large and leave the paired analysis — cost if wrong: H3's paired sample loses its longest prompts (n 97–99 of 100).
+Ruling: `--api-key-env NAME` falls back to a `NAME=value` line in the gitignored `.env`, read only when the variable is unset — cost if wrong: a free-tier key in plain text on the owner's disk.

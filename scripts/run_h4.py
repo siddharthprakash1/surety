@@ -15,7 +15,8 @@ from surety.decide import MockBackend, SystemOneClient
 from surety.env import BrowserGymEnv
 from surety.eval.analyze import load_collection
 from surety.eval.live import ALL_SYSTEMS, SYSTEMS, h4_table, run_episodes
-from surety.supervise.cli import add_supervisor_args, make_supervisor
+from surety.supervise.cli import add_supervisor_args, make_supervisor, parse_params
+from surety.supervise.client import RateLimited
 
 
 def main() -> int:
@@ -50,19 +51,28 @@ def main() -> int:
              "supervisor": {"url": a.supervisor_url, "model": a.supervisor_model, "json": a.supervisor_json,
                             "max_tokens": a.supervisor_max_tokens, "reasoning": a.supervisor_reasoning,
                             "temperature": None if a.supervisor_no_temperature else 0.0,
-                            "token_param": a.supervisor_token_param}}
+                            "token_param": a.supervisor_token_param,
+                            # only when given: files written before it existed still resume
+                            **({"params": params} if (params := parse_params(a.supervisor_param)) else {})}}
     backend = SystemOneClient(a.base_url) if a.backend == "kev" else MockBackend()
-    n = run_episodes(tasks, a.systems.split(","), [int(s) for s in a.seeds.split(",")],
+    before = len(a.out.read_text().splitlines()) if a.out.exists() else 0
+    code = 0
+    try:
+        run_episodes(tasks, a.systems.split(","), [int(s) for s in a.seeds.split(",")],
                      lambda t: BrowserGymEnv("miniwob." + t), backend, supervisor, a.out,
                      rows=load_collection(a.fit) if a.fit else None, eps=a.eps, audit_rate=a.audit_rate,
                      max_steps=a.max_steps, n_perm=a.n_perm or (5 if a.fit else 1),
                      n_perm_large=3 if a.fit and not a.n_perm else None, shadow_rate=a.shadow_rate, setup=setup)
+    except RateLimited as e:  # what ran is saved; the same command resumes
+        print(f"stopped: the supervisor is {e}; re-run the same command later", file=sys.stderr)
+        code = 75  # EX_TEMPFAIL
     records = [json.loads(x) for x in a.out.read_text().splitlines() if x]
+    n = len(records) - before
     report = a.out.with_suffix(".md")
     report.write_text(f"# H4: {a.out.stem}\n\n- episodes: {len(records)} (new {n}); eps {a.eps}; audit rate "
                       f"{a.audit_rate} (arisk); shadow rate {a.shadow_rate}\n\n{h4_table(records)}", encoding="utf-8")
     print(f"{n} new episodes; table in {report}")  # the table has non-ASCII (Δ): a cp1252 console cannot print it
-    return 0
+    return code
 
 
 if __name__ == "__main__":

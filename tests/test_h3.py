@@ -1,9 +1,11 @@
 import importlib.util
+import io
+import json
 from pathlib import Path
 
 from surety.eval.analyze import h3_table, select_escalated
 from surety.gate import SplitConformal
-from surety.supervise import MockSupervisor
+from surety.supervise import MockSupervisor, RateLimited
 from surety.types import Instance
 
 
@@ -75,13 +77,38 @@ def test_offline_supervisor_selects_proper_subsets():
         [r["id"] for r, _ in sel]
 
 
-def test_offline_supervisor_lists_set_in_page_order(tmp_path):
+def _script():
     spec = importlib.util.spec_from_file_location("h3", Path(__file__).parents[1] / "scripts/offline_supervisor.py")
     script = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(script)
-    inst = Instance("x", "s", "action_prediction", "operation", ["A: a", "B: b", "C: c"], 0, "ctx", "q", 0, "text")
-    row = {"id": "x", "split": "test_in", "task_type": "action_prediction", "option_ids": ["A", "B", "C"],
-           "gold_id": "A"}
+    return script
+
+
+_INST = Instance("x", "s", "action_prediction", "operation", ["A: a", "B: b", "C: c"], 0, "ctx", "q", 0, "text")
+_ROW = {"id": "x", "split": "test_in", "task_type": "action_prediction", "option_ids": ["A", "B", "C"], "gold_id": "A"}
+
+
+def test_offline_supervisor_lists_set_in_page_order(tmp_path):
     sup = MockSupervisor("C")
-    script.run([(row, ["C", "A"])], {"x": inst}, sup, tmp_path / "h3.jsonl")
+    _script().run([(_ROW, ["C", "A"])], {"x": _INST}, sup, tmp_path / "h3.jsonl")
     assert sup.candidates == [None, ["A", "C"]]
+
+
+class _CappedAfter(MockSupervisor):
+    def __init__(self, n):
+        super().__init__("C")
+        self.n = n
+
+    def choose(self, state, candidate_ids=None):
+        if self.calls == self.n:
+            raise RateLimited(3600.0)
+        return super().choose(state, candidate_ids)
+
+
+def test_offline_supervisor_stops_at_a_daily_cap_and_resumes(tmp_path):
+    script, out, log = _script(), tmp_path / "h3.jsonl", io.StringIO()
+    assert script.run([(_ROW, ["C", "A"])], {"x": _INST}, _CappedAfter(1), out, log=log) is False
+    assert len(out.read_text().splitlines()) == 1 and "stopped: rate limited" in log.getvalue()
+    assert script.run([(_ROW, ["C", "A"])], {"x": _INST}, MockSupervisor("C"), out, log=log) is True
+    assert [json.loads(x)["cond"] for x in out.read_text().splitlines()] == ["full", "set"]
+    assert log.getvalue().endswith("2/2 calls saved\n")
